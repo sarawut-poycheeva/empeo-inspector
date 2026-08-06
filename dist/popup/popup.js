@@ -24,6 +24,7 @@
   var env = document.getElementById("env");
   var blocked = document.getElementById("blocked");
   var stale = document.getElementById("stale");
+  var staleReason = document.getElementById("staleReason");
   var staleReload = document.getElementById("staleReload");
   var panel = document.getElementById("panel");
   var pickButton = document.getElementById("pick");
@@ -43,10 +44,15 @@
       return;
     }
     env.textContent = labelFor(url);
-    const reply = await ask(tabId);
+    let reply = await ask(tabId);
     if (!reply) {
-      stale.hidden = false;
-      return;
+      const error = await inject(tabId);
+      reply = error ? null : await ask(tabId);
+      if (!reply) {
+        staleReason.textContent = error ?? "\u0E2B\u0E19\u0E49\u0E32\u0E40\u0E27\u0E47\u0E1A\u0E44\u0E21\u0E48\u0E15\u0E2D\u0E1A\u0E01\u0E25\u0E31\u0E1A \u2014 \u0E42\u0E2B\u0E25\u0E14\u0E2B\u0E19\u0E49\u0E32\u0E43\u0E2B\u0E21\u0E48\u0E2B\u0E19\u0E36\u0E48\u0E07\u0E04\u0E23\u0E31\u0E49\u0E07";
+        stale.hidden = false;
+        return;
+      }
     }
     panel.hidden = false;
     const stored = await chrome.storage.session.get(STORAGE_KEY);
@@ -60,6 +66,14 @@
         resolve(chrome.runtime.lastError ? null : reply ?? null);
       });
     });
+  }
+  async function inject(id) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: id }, files: ["content/bridge.js"] });
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
   }
   function labelFor(url) {
     const host = new URL(url).hostname;
@@ -122,6 +136,7 @@
     if (!tabId) return;
     chrome.tabs.sendMessage(tabId, { type: MSG.startPick }, () => {
       if (chrome.runtime.lastError) {
+        staleReason.textContent = chrome.runtime.lastError.message ?? "";
         panel.hidden = true;
         stale.hidden = false;
         return;

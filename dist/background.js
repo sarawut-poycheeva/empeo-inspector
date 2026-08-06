@@ -18,6 +18,10 @@
       });
       return true;
     }
+    if (message?.type === MSG.setRules && message.rules) {
+      void chrome.storage.session.set({ [STORAGE_KEY]: message.rules });
+      return;
+    }
     if (message?.type === MSG.openPopup) {
       chrome.action.openPopup().catch(() => void 0);
       return;

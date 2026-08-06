@@ -2,7 +2,7 @@ import { isAllowedOrigin } from "../shared/allowlist.ts";
 import { collectSamples } from "../shared/match.ts";
 import { matchesScope, shortenUrl } from "../shared/scope.ts";
 import { findPrimaryArray, transformJsonText } from "../shared/transform.ts";
-import { OFF, PORT, type ChaosRules } from "../shared/types.ts";
+import { OFF, PORT, type ChaosRules, type Seen } from "../shared/types.ts";
 
 const SKIP_EXTENSION = /\.(js|mjs|css|map|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|eot)(\?|$)/i;
 const RULES_TIMEOUT_MS = 1000;
@@ -12,6 +12,7 @@ if (isAllowedOrigin(location.href)) {
 }
 
 function install(): void {
+	const seen = new Map<string, Seen>();
 	let rules: ChaosRules = OFF;
 	let ready = false;
 	let release: () => void;
@@ -25,10 +26,16 @@ function install(): void {
 
 	window.addEventListener("message", (event) => {
 		if (event.source !== window) return;
-		const data = event.data as { port?: string; rules?: ChaosRules } | null;
-		if (data?.port !== PORT || !data.rules) return;
-		rules = data.rules;
-		release();
+		const data = event.data as { port?: string; rules?: ChaosRules; want?: string } | null;
+		if (data?.port !== PORT) return;
+
+		if (data.rules) {
+			rules = data.rules;
+			release();
+		}
+		if (data.want === "dump") {
+			window.postMessage({ port: PORT, dump: [...seen.values()] }, "*");
+		}
 	});
 
 	const activeFor = (url: string) => rules.rowCount !== null && matchesScope(url, rules.urlContains);
@@ -42,18 +49,19 @@ function install(): void {
 		} catch {
 			return;
 		}
-		window.postMessage(
-			{
-				port: PORT,
-				seen: {
-					url,
-					name: shortenUrl(url),
-					rows: findPrimaryArray(parsed)?.length ?? null,
-					samples: collectSamples(parsed),
-				},
-			},
-			"*",
-		);
+
+		const entry: Seen = {
+			url,
+			name: shortenUrl(url),
+			rows: findPrimaryArray(parsed)?.length ?? null,
+			samples: collectSamples(parsed),
+		};
+
+		const previous = seen.get(entry.name);
+		if (previous && (previous.rows ?? -1) > (entry.rows ?? -1)) return;
+
+		seen.set(entry.name, entry);
+		window.postMessage({ port: PORT, seen: entry }, "*");
 	};
 
 	patchFetch();

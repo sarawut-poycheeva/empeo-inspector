@@ -156,6 +156,7 @@
     install();
   }
   function install() {
+    const seen = /* @__PURE__ */ new Map();
     let rules = OFF;
     let ready = false;
     let release;
@@ -169,9 +170,14 @@
     window.addEventListener("message", (event) => {
       if (event.source !== window) return;
       const data = event.data;
-      if (data?.port !== PORT || !data.rules) return;
-      rules = data.rules;
-      release();
+      if (data?.port !== PORT) return;
+      if (data.rules) {
+        rules = data.rules;
+        release();
+      }
+      if (data.want === "dump") {
+        window.postMessage({ port: PORT, dump: [...seen.values()] }, "*");
+      }
     });
     const activeFor = (url) => rules.rowCount !== null && matchesScope(url, rules.urlContains);
     const shouldSkip = (url) => SKIP_EXTENSION.test(url);
@@ -182,18 +188,16 @@
       } catch {
         return;
       }
-      window.postMessage(
-        {
-          port: PORT,
-          seen: {
-            url,
-            name: shortenUrl(url),
-            rows: findPrimaryArray(parsed)?.length ?? null,
-            samples: collectSamples(parsed)
-          }
-        },
-        "*"
-      );
+      const entry = {
+        url,
+        name: shortenUrl(url),
+        rows: findPrimaryArray(parsed)?.length ?? null,
+        samples: collectSamples(parsed)
+      };
+      const previous = seen.get(entry.name);
+      if (previous && (previous.rows ?? -1) > (entry.rows ?? -1)) return;
+      seen.set(entry.name, entry);
+      window.postMessage({ port: PORT, seen: entry }, "*");
     };
     patchFetch();
     patchXhr();

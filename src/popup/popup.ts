@@ -4,6 +4,7 @@ import { MSG, OFF, STORAGE_KEY, type ChaosRules, type Seen } from "../shared/typ
 const env = document.getElementById("env") as HTMLElement;
 const blocked = document.getElementById("blocked") as HTMLElement;
 const stale = document.getElementById("stale") as HTMLElement;
+const staleReason = document.getElementById("staleReason") as HTMLElement;
 const staleReload = document.getElementById("staleReload") as HTMLButtonElement;
 const panel = document.getElementById("panel") as HTMLElement;
 const pickButton = document.getElementById("pick") as HTMLButtonElement;
@@ -29,10 +30,15 @@ async function init(): Promise<void> {
 
 	env.textContent = labelFor(url);
 
-	const reply = await ask(tabId);
+	let reply = await ask(tabId);
 	if (!reply) {
-		stale.hidden = false;
-		return;
+		const error = await inject(tabId);
+		reply = error ? null : await ask(tabId);
+		if (!reply) {
+			staleReason.textContent = error ?? "หน้าเว็บไม่ตอบกลับ — โหลดหน้าใหม่หนึ่งครั้ง";
+			stale.hidden = false;
+			return;
+		}
 	}
 
 	panel.hidden = false;
@@ -49,6 +55,15 @@ function ask(id: number): Promise<{ seen?: Seen[] } | null> {
 			resolve(chrome.runtime.lastError ? null : (reply ?? null));
 		});
 	});
+}
+
+async function inject(id: number): Promise<string | null> {
+	try {
+		await chrome.scripting.executeScript({ target: { tabId: id }, files: ["content/bridge.js"] });
+		return null;
+	} catch (error) {
+		return error instanceof Error ? error.message : String(error);
+	}
 }
 
 function labelFor(url: string): string {
@@ -125,6 +140,7 @@ pickButton.addEventListener("click", () => {
 	if (!tabId) return;
 	chrome.tabs.sendMessage(tabId, { type: MSG.startPick }, () => {
 		if (chrome.runtime.lastError) {
+			staleReason.textContent = chrome.runtime.lastError.message ?? "";
 			panel.hidden = true;
 			stale.hidden = false;
 			return;
