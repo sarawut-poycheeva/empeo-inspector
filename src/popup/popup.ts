@@ -3,6 +3,8 @@ import { MSG, OFF, STORAGE_KEY, type ChaosRules, type Seen } from "../shared/typ
 
 const env = document.getElementById("env") as HTMLElement;
 const blocked = document.getElementById("blocked") as HTMLElement;
+const stale = document.getElementById("stale") as HTMLElement;
+const staleReload = document.getElementById("staleReload") as HTMLButtonElement;
 const panel = document.getElementById("panel") as HTMLElement;
 const pickButton = document.getElementById("pick") as HTMLButtonElement;
 const scopeList = document.getElementById("scope") as HTMLElement;
@@ -26,15 +28,26 @@ async function init(): Promise<void> {
 	}
 
 	env.textContent = labelFor(url);
+
+	const reply = await ask(tabId);
+	if (!reply) {
+		stale.hidden = false;
+		return;
+	}
+
 	panel.hidden = false;
 
 	const stored = await chrome.storage.session.get(STORAGE_KEY);
 	rules = (stored[STORAGE_KEY] as ChaosRules) ?? OFF;
 	paintRows();
+	paintScope(reply.seen ?? []);
+}
 
-	chrome.tabs.sendMessage(tabId, { type: MSG.getRules }, (response?: { seen?: Seen[] }) => {
-		if (chrome.runtime.lastError) return;
-		paintScope(response?.seen ?? []);
+function ask(id: number): Promise<{ seen?: Seen[] } | null> {
+	return new Promise((resolve) => {
+		chrome.tabs.sendMessage(id, { type: MSG.getRules }, (reply?: { seen?: Seen[] }) => {
+			resolve(chrome.runtime.lastError ? null : (reply ?? null));
+		});
 	});
 }
 
@@ -103,10 +116,21 @@ function paintScope(seen: Seen[]): void {
 	paintScopeSelection();
 }
 
+staleReload.addEventListener("click", () => {
+	if (tabId) chrome.tabs.reload(tabId);
+	window.close();
+});
+
 pickButton.addEventListener("click", () => {
 	if (!tabId) return;
-	chrome.tabs.sendMessage(tabId, { type: MSG.startPick }, () => void chrome.runtime.lastError);
-	window.close();
+	chrome.tabs.sendMessage(tabId, { type: MSG.startPick }, () => {
+		if (chrome.runtime.lastError) {
+			panel.hidden = true;
+			stale.hidden = false;
+			return;
+		}
+		window.close();
+	});
 });
 
 scopeList.addEventListener("click", (event) => {

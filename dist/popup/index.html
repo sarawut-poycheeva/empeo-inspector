@@ -10,9 +10,15 @@
 			<span class="env" id="env">—</span>
 		</header>
 
-		<div class="blocked" id="blocked" hidden>
+		<div class="notice" id="blocked" hidden>
 			<p>หน้านี้ไม่อยู่ในรายชื่อที่อนุญาต</p>
 			<p class="hosts">localhost · portal.dev.empeo.com · portal.uat.empeo.com</p>
+		</div>
+
+		<div class="notice" id="stale" hidden>
+			<p>ยังต่อกับหน้านี้ไม่ได้</p>
+			<p class="hosts">โหลดหน้าเว็บใหม่หนึ่งครั้ง แล้วเปิดอีกที</p>
+			<button class="pick" type="button" id="staleReload">โหลดหน้าใหม่</button>
 		</div>
 
 		<main id="panel" hidden>
@@ -22,7 +28,7 @@
 				<ul class="scope" id="scope">
 					<li>
 						<button type="button" data-scope="" aria-pressed="true">
-							<span class="path">ทั้งหน้า</span>
+							<span class="head"><span class="path">ทั้งหน้า</span></span>
 						</button>
 					</li>
 				</ul>

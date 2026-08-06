@@ -3,16 +3,13 @@ import { bestMatch, normalise, type Candidate } from "../shared/match.ts";
 const ACCENT = "#c2610a";
 const MIN_TOKENS = 2;
 const MAX_TOKENS = 60;
-const TOAST_MS = 3200;
+const TOAST_MS = 3600;
 
-let stop: (() => void) | null = null;
-
-export function isPicking(): boolean {
-	return stop !== null;
-}
+let active = false;
 
 export function startPick(candidates: () => Candidate[], onPick: (candidate: Candidate) => void): void {
-	if (stop) return;
+	if (active || !document.body) return;
+	active = true;
 
 	const outline = element("div", [
 		"position:fixed",
@@ -20,7 +17,6 @@ export function startPick(candidates: () => Candidate[], onPick: (candidate: Can
 		`border:2px solid ${ACCENT}`,
 		`background:${ACCENT}1a`,
 		"pointer-events:none",
-		"transition:all .06s linear",
 		"display:none",
 	]);
 
@@ -45,27 +41,38 @@ export function startPick(candidates: () => Candidate[], onPick: (candidate: Can
 	document.body.style.cursor = "crosshair";
 
 	let target: Element | null = null;
+	let queued = false;
+	let pointer = { x: 0, y: 0 };
 
 	const onMove = (event: MouseEvent) => {
-		const found = subjectAt(event.clientX, event.clientY);
-		target = found;
-		if (!found) {
-			outline.style.display = "none";
-			return;
-		}
-		const box = found.getBoundingClientRect();
-		Object.assign(outline.style, {
-			display: "block",
-			top: `${box.top}px`,
-			left: `${box.left}px`,
-			width: `${box.width}px`,
-			height: `${box.height}px`,
+		pointer = { x: event.clientX, y: event.clientY };
+		if (queued) return;
+		queued = true;
+		requestAnimationFrame(() => {
+			queued = false;
+			target = subjectAt(pointer.x, pointer.y);
+			if (!target) {
+				outline.style.display = "none";
+				return;
+			}
+			const box = target.getBoundingClientRect();
+			Object.assign(outline.style, {
+				display: "block",
+				top: `${box.top}px`,
+				left: `${box.left}px`,
+				width: `${box.width}px`,
+				height: `${box.height}px`,
+			});
 		});
 	};
 
-	const onClick = (event: MouseEvent) => {
+	const swallow = (event: Event) => {
 		event.preventDefault();
-		event.stopPropagation();
+		event.stopImmediatePropagation();
+	};
+
+	const onClick = (event: MouseEvent) => {
+		swallow(event);
 
 		const chosen = target ?? subjectAt(event.clientX, event.clientY);
 		const tokens = chosen ? tokensIn(chosen) : [];
@@ -75,38 +82,45 @@ export function startPick(candidates: () => Candidate[], onPick: (candidate: Can
 		if (match) {
 			toast(`เลือก ${match.name} แล้ว`);
 			onPick(match);
+		} else if (tokens.length === 0) {
+			toast("ตรงนี้ไม่มีข้อความให้เทียบ — ลองคลิกที่แถวในตาราง");
 		} else {
-			toast("ไม่พบ API ที่ตรงกับข้อความตรงนี้ — ลองคลิกที่แถวในตาราง");
+			toast("ไม่พบ API ที่ตรงกับข้อความตรงนี้ — ข้อมูลอาจโหลดมาก่อนเปิดเครื่องมือ");
 		}
 	};
 
 	const onKey = (event: KeyboardEvent) => {
 		if (event.key !== "Escape") return;
-		event.preventDefault();
+		swallow(event);
 		finish();
 	};
 
 	const finish = () => {
 		document.removeEventListener("mousemove", onMove, true);
 		document.removeEventListener("click", onClick, true);
+		document.removeEventListener("mousedown", swallow, true);
+		document.removeEventListener("pointerdown", swallow, true);
 		document.removeEventListener("keydown", onKey, true);
 		outline.remove();
 		hint.remove();
 		document.body.style.cursor = previousCursor;
-		stop = null;
+		active = false;
 	};
 
 	document.addEventListener("mousemove", onMove, true);
 	document.addEventListener("click", onClick, true);
+	document.addEventListener("mousedown", swallow, true);
+	document.addEventListener("pointerdown", swallow, true);
 	document.addEventListener("keydown", onKey, true);
-	stop = finish;
 }
 
 function subjectAt(x: number, y: number): Element | null {
 	let node = document.elementFromPoint(x, y);
-	while (node && node !== document.body) {
+	let hops = 0;
+	while (node && node !== document.body && hops < 12) {
 		if (tokensIn(node).length >= MIN_TOKENS) return node;
 		node = node.parentElement;
+		hops++;
 	}
 	return null;
 }
@@ -148,6 +162,8 @@ function toast(message: string): void {
 		"border-radius:6px",
 		"pointer-events:none",
 		"box-shadow:0 6px 20px rgba(0,0,0,.35)",
+		"max-width:80vw",
+		"text-align:center",
 	]);
 	node.textContent = message;
 	document.body.append(node);

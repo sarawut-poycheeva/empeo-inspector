@@ -23,6 +23,8 @@
   // src/popup/popup.ts
   var env = document.getElementById("env");
   var blocked = document.getElementById("blocked");
+  var stale = document.getElementById("stale");
+  var staleReload = document.getElementById("staleReload");
   var panel = document.getElementById("panel");
   var pickButton = document.getElementById("pick");
   var scopeList = document.getElementById("scope");
@@ -41,13 +43,22 @@
       return;
     }
     env.textContent = labelFor(url);
+    const reply = await ask(tabId);
+    if (!reply) {
+      stale.hidden = false;
+      return;
+    }
     panel.hidden = false;
     const stored = await chrome.storage.session.get(STORAGE_KEY);
     rules = stored[STORAGE_KEY] ?? OFF;
     paintRows();
-    chrome.tabs.sendMessage(tabId, { type: MSG.getRules }, (response) => {
-      if (chrome.runtime.lastError) return;
-      paintScope(response?.seen ?? []);
+    paintScope(reply.seen ?? []);
+  }
+  function ask(id) {
+    return new Promise((resolve) => {
+      chrome.tabs.sendMessage(id, { type: MSG.getRules }, (reply) => {
+        resolve(chrome.runtime.lastError ? null : reply ?? null);
+      });
     });
   }
   function labelFor(url) {
@@ -103,10 +114,20 @@
     scopeList.replaceChildren(...all ? [all, ...items] : items);
     paintScopeSelection();
   }
+  staleReload.addEventListener("click", () => {
+    if (tabId) chrome.tabs.reload(tabId);
+    window.close();
+  });
   pickButton.addEventListener("click", () => {
     if (!tabId) return;
-    chrome.tabs.sendMessage(tabId, { type: MSG.startPick }, () => void chrome.runtime.lastError);
-    window.close();
+    chrome.tabs.sendMessage(tabId, { type: MSG.startPick }, () => {
+      if (chrome.runtime.lastError) {
+        panel.hidden = true;
+        stale.hidden = false;
+        return;
+      }
+      window.close();
+    });
   });
   scopeList.addEventListener("click", (event) => {
     const button = event.target.closest("button");

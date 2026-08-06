@@ -40,17 +40,17 @@
   var ACCENT = "#c2610a";
   var MIN_TOKENS = 2;
   var MAX_TOKENS = 60;
-  var TOAST_MS = 3200;
-  var stop = null;
+  var TOAST_MS = 3600;
+  var active = false;
   function startPick(candidates2, onPick) {
-    if (stop) return;
+    if (active || !document.body) return;
+    active = true;
     const outline = element("div", [
       "position:fixed",
       "z-index:2147483646",
       `border:2px solid ${ACCENT}`,
       `background:${ACCENT}1a`,
       "pointer-events:none",
-      "transition:all .06s linear",
       "display:none"
     ]);
     const hint = element("div", [
@@ -72,25 +72,35 @@
     const previousCursor = document.body.style.cursor;
     document.body.style.cursor = "crosshair";
     let target = null;
+    let queued = false;
+    let pointer = { x: 0, y: 0 };
     const onMove = (event) => {
-      const found = subjectAt(event.clientX, event.clientY);
-      target = found;
-      if (!found) {
-        outline.style.display = "none";
-        return;
-      }
-      const box = found.getBoundingClientRect();
-      Object.assign(outline.style, {
-        display: "block",
-        top: `${box.top}px`,
-        left: `${box.left}px`,
-        width: `${box.width}px`,
-        height: `${box.height}px`
+      pointer = { x: event.clientX, y: event.clientY };
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        target = subjectAt(pointer.x, pointer.y);
+        if (!target) {
+          outline.style.display = "none";
+          return;
+        }
+        const box = target.getBoundingClientRect();
+        Object.assign(outline.style, {
+          display: "block",
+          top: `${box.top}px`,
+          left: `${box.left}px`,
+          width: `${box.width}px`,
+          height: `${box.height}px`
+        });
       });
     };
-    const onClick = (event) => {
+    const swallow = (event) => {
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+    const onClick = (event) => {
+      swallow(event);
       const chosen = target ?? subjectAt(event.clientX, event.clientY);
       const tokens = chosen ? tokensIn(chosen) : [];
       const match = bestMatch(tokens, candidates2());
@@ -98,34 +108,41 @@
       if (match) {
         toast(`\u0E40\u0E25\u0E37\u0E2D\u0E01 ${match.name} \u0E41\u0E25\u0E49\u0E27`);
         onPick(match);
+      } else if (tokens.length === 0) {
+        toast("\u0E15\u0E23\u0E07\u0E19\u0E35\u0E49\u0E44\u0E21\u0E48\u0E21\u0E35\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E43\u0E2B\u0E49\u0E40\u0E17\u0E35\u0E22\u0E1A \u2014 \u0E25\u0E2D\u0E07\u0E04\u0E25\u0E34\u0E01\u0E17\u0E35\u0E48\u0E41\u0E16\u0E27\u0E43\u0E19\u0E15\u0E32\u0E23\u0E32\u0E07");
       } else {
-        toast("\u0E44\u0E21\u0E48\u0E1E\u0E1A API \u0E17\u0E35\u0E48\u0E15\u0E23\u0E07\u0E01\u0E31\u0E1A\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E15\u0E23\u0E07\u0E19\u0E35\u0E49 \u2014 \u0E25\u0E2D\u0E07\u0E04\u0E25\u0E34\u0E01\u0E17\u0E35\u0E48\u0E41\u0E16\u0E27\u0E43\u0E19\u0E15\u0E32\u0E23\u0E32\u0E07");
+        toast("\u0E44\u0E21\u0E48\u0E1E\u0E1A API \u0E17\u0E35\u0E48\u0E15\u0E23\u0E07\u0E01\u0E31\u0E1A\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E15\u0E23\u0E07\u0E19\u0E35\u0E49 \u2014 \u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E2D\u0E32\u0E08\u0E42\u0E2B\u0E25\u0E14\u0E21\u0E32\u0E01\u0E48\u0E2D\u0E19\u0E40\u0E1B\u0E34\u0E14\u0E40\u0E04\u0E23\u0E37\u0E48\u0E2D\u0E07\u0E21\u0E37\u0E2D");
       }
     };
     const onKey = (event) => {
       if (event.key !== "Escape") return;
-      event.preventDefault();
+      swallow(event);
       finish();
     };
     const finish = () => {
       document.removeEventListener("mousemove", onMove, true);
       document.removeEventListener("click", onClick, true);
+      document.removeEventListener("mousedown", swallow, true);
+      document.removeEventListener("pointerdown", swallow, true);
       document.removeEventListener("keydown", onKey, true);
       outline.remove();
       hint.remove();
       document.body.style.cursor = previousCursor;
-      stop = null;
+      active = false;
     };
     document.addEventListener("mousemove", onMove, true);
     document.addEventListener("click", onClick, true);
+    document.addEventListener("mousedown", swallow, true);
+    document.addEventListener("pointerdown", swallow, true);
     document.addEventListener("keydown", onKey, true);
-    stop = finish;
   }
   function subjectAt(x, y) {
     let node = document.elementFromPoint(x, y);
-    while (node && node !== document.body) {
+    let hops = 0;
+    while (node && node !== document.body && hops < 12) {
       if (tokensIn(node).length >= MIN_TOKENS) return node;
       node = node.parentElement;
+      hops++;
     }
     return null;
   }
@@ -162,7 +179,9 @@
       "padding:10px 16px",
       "border-radius:6px",
       "pointer-events:none",
-      "box-shadow:0 6px 20px rgba(0,0,0,.35)"
+      "box-shadow:0 6px 20px rgba(0,0,0,.35)",
+      "max-width:80vw",
+      "text-align:center"
     ]);
     node.textContent = message;
     document.body.append(node);

@@ -64,13 +64,18 @@ body {
 	padding: 2px 6px;
 }
 
-.blocked {
+.notice {
 	padding: 18px 14px;
 }
 
-.blocked p {
+.notice p {
 	margin: 0 0 6px;
 	color: var(--ink-2);
+}
+
+.notice .pick {
+	margin-top: 10px;
+	margin-bottom: 0;
 }
 
 .hosts {
