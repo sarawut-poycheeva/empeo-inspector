@@ -1,5 +1,5 @@
 import { isAllowedOrigin } from "../shared/allowlist.ts";
-import { MSG, OFF, STORAGE_KEY, type ChaosRules, type Seen } from "../shared/types.ts";
+import { OFF, STORAGE_KEY, type ChaosRules, type Seen } from "../shared/types.ts";
 
 const env = document.getElementById("env") as HTMLElement;
 const blocked = document.getElementById("blocked") as HTMLElement;
@@ -30,40 +30,30 @@ async function init(): Promise<void> {
 
 	env.textContent = labelFor(url);
 
-	let reply = await ask(tabId);
-	if (!reply) {
-		const error = await inject(tabId);
-		reply = error ? null : await ask(tabId);
-		if (!reply) {
-			staleReason.textContent = error ?? "หน้าเว็บไม่ตอบกลับ — โหลดหน้าใหม่หนึ่งครั้ง";
-			stale.hidden = false;
-			return;
-		}
-	}
-
-	panel.hidden = false;
-
 	const stored = await chrome.storage.session.get(STORAGE_KEY);
 	rules = (stored[STORAGE_KEY] as ChaosRules) ?? OFF;
-	paintRows();
-	paintScope(reply.seen ?? []);
-}
 
-function ask(id: number): Promise<{ seen?: Seen[] } | null> {
-	return new Promise((resolve) => {
-		chrome.tabs.sendMessage(id, { type: MSG.getRules }, (reply?: { seen?: Seen[] }) => {
-			resolve(chrome.runtime.lastError ? null : (reply ?? null));
-		});
-	});
-}
-
-async function inject(id: number): Promise<string | null> {
 	try {
-		await chrome.scripting.executeScript({ target: { tabId: id }, files: ["content/bridge.js"] });
-		return null;
+		const state = await readState(tabId);
+		panel.hidden = false;
+		paintRows();
+		paintScope(state.seen);
 	} catch (error) {
-		return error instanceof Error ? error.message : String(error);
+		staleReason.textContent = error instanceof Error ? error.message : String(error);
+		stale.hidden = false;
 	}
+}
+
+async function readState(id: number): Promise<{ rules: ChaosRules; seen: Seen[] }> {
+	const [result] = await chrome.scripting.executeScript({
+		target: { tabId: id },
+		world: "MAIN",
+		func: () => window.__empeoInspector?.state() ?? null,
+	});
+
+	const state = result?.result as { rules: ChaosRules; seen: Seen[] } | null;
+	if (!state) throw new Error("ส่วนขยายยังไม่ได้เข้าไปในหน้านี้ — โหลดหน้าใหม่หนึ่งครั้ง");
+	return state;
 }
 
 function labelFor(url: string): string {
@@ -138,15 +128,18 @@ staleReload.addEventListener("click", () => {
 
 pickButton.addEventListener("click", () => {
 	if (!tabId) return;
-	chrome.tabs.sendMessage(tabId, { type: MSG.startPick }, () => {
-		if (chrome.runtime.lastError) {
-			staleReason.textContent = chrome.runtime.lastError.message ?? "";
+	void chrome.scripting
+		.executeScript({
+			target: { tabId },
+			world: "MAIN",
+			func: () => window.__empeoInspector?.pick(),
+		})
+		.then(() => window.close())
+		.catch((error: unknown) => {
+			staleReason.textContent = error instanceof Error ? error.message : String(error);
 			panel.hidden = true;
 			stale.hidden = false;
-			return;
-		}
-		window.close();
-	});
+		});
 });
 
 scopeList.addEventListener("click", (event) => {
@@ -156,7 +149,7 @@ scopeList.addEventListener("click", (event) => {
 	const value = button.dataset.scope ?? "";
 	rules = { ...rules, urlContains: value === "" ? null : value };
 	paintScopeSelection();
-	void save();
+	void chrome.storage.session.set({ [STORAGE_KEY]: rules });
 });
 
 rowsGroup.addEventListener("click", (event) => {
@@ -167,19 +160,8 @@ rowsGroup.addEventListener("click", (event) => {
 	rules = { ...rules, rowCount: value === "off" ? null : Number(value) };
 	paintRows();
 
-	void save().then(() => {
+	void chrome.storage.session.set({ [STORAGE_KEY]: rules }).then(() => {
 		chrome.tabs.reload(tabId as number);
 		window.close();
 	});
 });
-
-async function save(): Promise<void> {
-	await chrome.storage.session.set({ [STORAGE_KEY]: rules });
-	if (!tabId) return;
-	await new Promise<void>((resolve) => {
-		chrome.tabs.sendMessage(tabId as number, { type: MSG.setRules, rules }, () => {
-			void chrome.runtime.lastError;
-			resolve();
-		});
-	});
-}

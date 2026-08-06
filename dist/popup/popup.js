@@ -13,12 +13,6 @@
   // src/shared/types.ts
   var OFF = { rowCount: null, urlContains: null };
   var STORAGE_KEY = "chaosRules";
-  var MSG = {
-    getRules: "empeo-inspector:get-rules",
-    setRules: "empeo-inspector:set-rules",
-    startPick: "empeo-inspector:start-pick",
-    openPopup: "empeo-inspector:open-popup"
-  };
 
   // src/popup/popup.ts
   var env = document.getElementById("env");
@@ -44,36 +38,27 @@
       return;
     }
     env.textContent = labelFor(url);
-    let reply = await ask(tabId);
-    if (!reply) {
-      const error = await inject(tabId);
-      reply = error ? null : await ask(tabId);
-      if (!reply) {
-        staleReason.textContent = error ?? "\u0E2B\u0E19\u0E49\u0E32\u0E40\u0E27\u0E47\u0E1A\u0E44\u0E21\u0E48\u0E15\u0E2D\u0E1A\u0E01\u0E25\u0E31\u0E1A \u2014 \u0E42\u0E2B\u0E25\u0E14\u0E2B\u0E19\u0E49\u0E32\u0E43\u0E2B\u0E21\u0E48\u0E2B\u0E19\u0E36\u0E48\u0E07\u0E04\u0E23\u0E31\u0E49\u0E07";
-        stale.hidden = false;
-        return;
-      }
-    }
-    panel.hidden = false;
     const stored = await chrome.storage.session.get(STORAGE_KEY);
     rules = stored[STORAGE_KEY] ?? OFF;
-    paintRows();
-    paintScope(reply.seen ?? []);
-  }
-  function ask(id) {
-    return new Promise((resolve) => {
-      chrome.tabs.sendMessage(id, { type: MSG.getRules }, (reply) => {
-        resolve(chrome.runtime.lastError ? null : reply ?? null);
-      });
-    });
-  }
-  async function inject(id) {
     try {
-      await chrome.scripting.executeScript({ target: { tabId: id }, files: ["content/bridge.js"] });
-      return null;
+      const state = await readState(tabId);
+      panel.hidden = false;
+      paintRows();
+      paintScope(state.seen);
     } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      staleReason.textContent = error instanceof Error ? error.message : String(error);
+      stale.hidden = false;
     }
+  }
+  async function readState(id) {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: id },
+      world: "MAIN",
+      func: () => window.__empeoInspector?.state() ?? null
+    });
+    const state = result?.result;
+    if (!state) throw new Error("\u0E2A\u0E48\u0E27\u0E19\u0E02\u0E22\u0E32\u0E22\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E40\u0E02\u0E49\u0E32\u0E44\u0E1B\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E19\u0E35\u0E49 \u2014 \u0E42\u0E2B\u0E25\u0E14\u0E2B\u0E19\u0E49\u0E32\u0E43\u0E2B\u0E21\u0E48\u0E2B\u0E19\u0E36\u0E48\u0E07\u0E04\u0E23\u0E31\u0E49\u0E07");
+    return state;
   }
   function labelFor(url) {
     const host = new URL(url).hostname;
@@ -134,14 +119,14 @@
   });
   pickButton.addEventListener("click", () => {
     if (!tabId) return;
-    chrome.tabs.sendMessage(tabId, { type: MSG.startPick }, () => {
-      if (chrome.runtime.lastError) {
-        staleReason.textContent = chrome.runtime.lastError.message ?? "";
-        panel.hidden = true;
-        stale.hidden = false;
-        return;
-      }
-      window.close();
+    void chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: () => window.__empeoInspector?.pick()
+    }).then(() => window.close()).catch((error) => {
+      staleReason.textContent = error instanceof Error ? error.message : String(error);
+      panel.hidden = true;
+      stale.hidden = false;
     });
   });
   scopeList.addEventListener("click", (event) => {
@@ -150,7 +135,7 @@
     const value = button.dataset.scope ?? "";
     rules = { ...rules, urlContains: value === "" ? null : value };
     paintScopeSelection();
-    void save();
+    void chrome.storage.session.set({ [STORAGE_KEY]: rules });
   });
   rowsGroup.addEventListener("click", (event) => {
     const button = event.target.closest("button");
@@ -158,19 +143,9 @@
     const value = button.dataset.count;
     rules = { ...rules, rowCount: value === "off" ? null : Number(value) };
     paintRows();
-    void save().then(() => {
+    void chrome.storage.session.set({ [STORAGE_KEY]: rules }).then(() => {
       chrome.tabs.reload(tabId);
       window.close();
     });
   });
-  async function save() {
-    await chrome.storage.session.set({ [STORAGE_KEY]: rules });
-    if (!tabId) return;
-    await new Promise((resolve) => {
-      chrome.tabs.sendMessage(tabId, { type: MSG.setRules, rules }, () => {
-        void chrome.runtime.lastError;
-        resolve();
-      });
-    });
-  }
 })();

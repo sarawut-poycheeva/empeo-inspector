@@ -10,9 +10,6 @@ export const OFF: ChaosRules = { rowCount: null, urlContains: null };
 export const STORAGE_KEY = "chaosRules";
 
 export const MSG = {
-	getRules: "empeo-inspector:get-rules",
-	setRules: "empeo-inspector:set-rules",
-	startPick: "empeo-inspector:start-pick",
 	openPopup: "empeo-inspector:open-popup",
 } as const;
 
@@ -21,6 +18,17 @@ export interface Seen {
 	name: string;
 	rows: number | null;
 	samples: string[];
+}
+
+export interface InspectorApi {
+	state(): { rules: ChaosRules; seen: Seen[] };
+	pick(): void;
+}
+
+declare global {
+	interface Window {
+		__empeoInspector?: InspectorApi;
+	}
 }
 
 export const PORT = "empeo-inspector";

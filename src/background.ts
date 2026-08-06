@@ -1,20 +1,15 @@
-import { MSG, OFF, STORAGE_KEY, type ChaosRules } from "./shared/types.ts";
+import { MSG } from "./shared/types.ts";
 
-chrome.runtime.onMessage.addListener((message: { type?: string; rules?: ChaosRules }, _sender, sendResponse) => {
-	if (message?.type === MSG.getRules) {
-		chrome.storage.session.get(STORAGE_KEY, (stored: Record<string, ChaosRules | undefined>) => {
-			sendResponse({ rules: stored[STORAGE_KEY] ?? OFF });
-		});
-		return true;
-	}
+function openSessionStorageToContentScripts(): void {
+	chrome.storage.session
+		.setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })
+		.catch(() => undefined);
+}
 
-	if (message?.type === MSG.setRules && message.rules) {
-		void chrome.storage.session.set({ [STORAGE_KEY]: message.rules });
-		return;
-	}
+openSessionStorageToContentScripts();
+chrome.runtime.onInstalled.addListener(openSessionStorageToContentScripts);
+chrome.runtime.onStartup.addListener(openSessionStorageToContentScripts);
 
-	if (message?.type === MSG.openPopup) {
-		chrome.action.openPopup().catch(() => undefined);
-		return;
-	}
+chrome.runtime.onMessage.addListener((message: { type?: string }) => {
+	if (message?.type === MSG.openPopup) chrome.action.openPopup().catch(() => undefined);
 });
