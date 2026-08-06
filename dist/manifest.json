@@ -3,7 +3,7 @@
 	"name": "empeo Inspector",
 	"version": "0.1.0",
 	"description": "ตรวจและควบคุมพฤติกรรมของ empeo ตอน runtime",
-	"permissions": ["storage", "tabs", "scripting"],
+	"permissions": ["storage"],
 	"host_permissions": [
 		"http://localhost/*",
 		"http://127.0.0.1/*",

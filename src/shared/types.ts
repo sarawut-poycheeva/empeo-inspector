@@ -7,12 +7,6 @@ export interface ChaosRules {
 
 export const OFF: ChaosRules = { rowCount: null, urlContains: null };
 
-export const STORAGE_KEY = "chaosRules";
-
-export const MSG = {
-	openPopup: "empeo-inspector:open-popup",
-} as const;
-
 export interface Seen {
 	url: string;
 	name: string;
@@ -20,15 +14,18 @@ export interface Seen {
 	samples: string[];
 }
 
-export interface InspectorApi {
-	state(): { rules: ChaosRules; seen: Seen[] };
-	pick(): void;
+export const RULES_KEY = "chaosRules";
+
+export function seenKey(origin: string): string {
+	return `seen:${origin}`;
 }
 
-declare global {
-	interface Window {
-		__empeoInspector?: InspectorApi;
-	}
+export function pickKey(origin: string): string {
+	return `pick:${origin}`;
 }
+
+export const MSG = {
+	openPopup: "empeo-inspector:open-popup",
+} as const;
 
 export const PORT = "empeo-inspector";

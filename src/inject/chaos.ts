@@ -2,7 +2,7 @@ import { isAllowedOrigin } from "../shared/allowlist.ts";
 import { collectSamples } from "../shared/match.ts";
 import { matchesScope, shortenUrl } from "../shared/scope.ts";
 import { findPrimaryArray, transformJsonText } from "../shared/transform.ts";
-import { OFF, PORT, type ChaosRules, type InspectorApi, type Seen } from "../shared/types.ts";
+import { OFF, PORT, type ChaosRules, type Seen } from "../shared/types.ts";
 import { startPick } from "./pick.ts";
 
 const SKIP_EXTENSION = /\.(js|mjs|css|map|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|eot)(\?|$)/i;
@@ -26,25 +26,25 @@ function install(): void {
 	});
 	setTimeout(() => release(), RULES_TIMEOUT_MS);
 
-	const api: InspectorApi = {
-		state: () => ({ rules, seen: [...seen.values()] }),
-		pick: () =>
+	window.addEventListener("message", (event) => {
+		if (event.source !== window) return;
+		const data = event.data as { port?: string; rules?: ChaosRules; action?: string } | null;
+		if (data?.port !== PORT) return;
+
+		if (data.rules) {
+			setRules(data.rules);
+			release();
+		}
+
+		if (data.action === "pick") {
 			startPick(
 				() => [...seen.values()].map(({ name, samples, rows }) => ({ name, samples, rows })),
 				(candidate) => {
 					setRules({ ...rules, urlContains: candidate.name });
 					window.postMessage({ port: PORT, picked: candidate.name }, "*");
 				},
-			),
-	};
-	window.__empeoInspector = api;
-
-	window.addEventListener("message", (event) => {
-		if (event.source !== window) return;
-		const data = event.data as { port?: string; rules?: ChaosRules } | null;
-		if (data?.port !== PORT || !data.rules) return;
-		setRules(data.rules);
-		release();
+			);
+		}
 	});
 
 	patchFetch();
@@ -76,7 +76,9 @@ function install(): void {
 
 		const previous = seen.get(entry.name);
 		if (previous && (previous.rows ?? -1) > (entry.rows ?? -1)) return;
+
 		seen.set(entry.name, entry);
+		window.postMessage({ port: PORT, seen: entry }, "*");
 	}
 
 	function patchFetch(): void {

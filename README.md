@@ -70,9 +70,22 @@ npm run typecheck
 ```
 
 หลังแก้โค้ดต้องกด **Reload** ที่การ์ดของส่วนขยายใน `chrome://extensions` **แล้วโหลดหน้าเว็บใหม่ด้วย**
+เพราะ script ที่ฝังอยู่ในหน้าที่เปิดค้างไว้จะใช้ต่อไม่ได้
 
-การ Reload ส่วนขยายทำให้ script ที่ฝังอยู่ในหน้าที่เปิดค้างไว้ใช้ต่อไม่ได้ ถ้าลืมโหลดหน้าใหม่
-popup จะขึ้นว่า *ยังต่อกับหน้านี้ไม่ได้* พร้อมปุ่มโหลดหน้าใหม่ให้
+ถ้า **เพิ่ม permission ใหม่ใน `manifest.json`** การกด Reload ไม่พอ ต้อง **Remove แล้ว Load unpacked ใหม่**
+
+## การเชื่อมต่อภายใน
+
+ทุกอย่างวิ่งผ่าน `chrome.storage.local` กับ `window.postMessage` ทางเดียวเท่านั้น
+ไม่มีการส่งคำถามแล้วรอคำตอบข้ามบริบท ไม่ใช้ `chrome.scripting` และขอ permission แค่ `storage`
+
+```
+popup ──storage.local──▶ bridge (isolated) ──postMessage──▶ chaos (MAIN)
+      ◀──storage.local──          ◀──postMessage──
+```
+
+ตั้งใจให้เรียบง่ายระดับนี้เพราะช่องทางอื่นของ Chrome (message port, การฉีด script ตอน runtime,
+permission ที่เพิ่มภายหลัง) ล้มเหลวไปแล้วทุกทางตอนสร้าง — ดูเหตุผลเต็มใน git log
 
 `src/shared/transform.ts` เป็นฟังก์ชันล้วน ทดสอบได้โดยไม่ต้องมีเบราว์เซอร์ ส่วนที่เหลือต้องทดสอบ
 ด้วยมือบน `portal.uat.empeo.com`

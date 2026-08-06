@@ -340,23 +340,23 @@
       };
     });
     setTimeout(() => release(), RULES_TIMEOUT_MS);
-    const api = {
-      state: () => ({ rules, seen: [...seen.values()] }),
-      pick: () => startPick(
-        () => [...seen.values()].map(({ name, samples, rows }) => ({ name, samples, rows })),
-        (candidate) => {
-          setRules({ ...rules, urlContains: candidate.name });
-          window.postMessage({ port: PORT, picked: candidate.name }, "*");
-        }
-      )
-    };
-    window.__empeoInspector = api;
     window.addEventListener("message", (event) => {
       if (event.source !== window) return;
       const data = event.data;
-      if (data?.port !== PORT || !data.rules) return;
-      setRules(data.rules);
-      release();
+      if (data?.port !== PORT) return;
+      if (data.rules) {
+        setRules(data.rules);
+        release();
+      }
+      if (data.action === "pick") {
+        startPick(
+          () => [...seen.values()].map(({ name, samples, rows }) => ({ name, samples, rows })),
+          (candidate) => {
+            setRules({ ...rules, urlContains: candidate.name });
+            window.postMessage({ port: PORT, picked: candidate.name }, "*");
+          }
+        );
+      }
     });
     patchFetch();
     patchXhr();
@@ -383,6 +383,7 @@
       const previous = seen.get(entry.name);
       if (previous && (previous.rows ?? -1) > (entry.rows ?? -1)) return;
       seen.set(entry.name, entry);
+      window.postMessage({ port: PORT, seen: entry }, "*");
     }
     function patchFetch() {
       const original = window.fetch;

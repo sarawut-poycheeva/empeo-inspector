@@ -1,11 +1,8 @@
 import { isAllowedOrigin } from "../shared/allowlist.ts";
-import { OFF, STORAGE_KEY, type ChaosRules, type Seen } from "../shared/types.ts";
+import { OFF, RULES_KEY, pickKey, seenKey, type ChaosRules, type Seen } from "../shared/types.ts";
 
 const env = document.getElementById("env") as HTMLElement;
 const blocked = document.getElementById("blocked") as HTMLElement;
-const stale = document.getElementById("stale") as HTMLElement;
-const staleReason = document.getElementById("staleReason") as HTMLElement;
-const staleReload = document.getElementById("staleReload") as HTMLButtonElement;
 const panel = document.getElementById("panel") as HTMLElement;
 const pickButton = document.getElementById("pick") as HTMLButtonElement;
 const scopeList = document.getElementById("scope") as HTMLElement;
@@ -13,6 +10,7 @@ const scopeNote = document.getElementById("scopeNote") as HTMLElement;
 const rowsGroup = document.getElementById("rows") as HTMLElement;
 
 let tabId: number | undefined;
+let origin = "";
 let rules: ChaosRules = OFF;
 
 void init();
@@ -28,32 +26,19 @@ async function init(): Promise<void> {
 		return;
 	}
 
+	origin = new URL(url).origin;
 	env.textContent = labelFor(url);
+	panel.hidden = false;
 
-	const stored = await chrome.storage.session.get(STORAGE_KEY);
-	rules = (stored[STORAGE_KEY] as ChaosRules) ?? OFF;
+	const stored = await chrome.storage.local.get([RULES_KEY, seenKey(origin)]);
+	rules = (stored[RULES_KEY] as ChaosRules) ?? OFF;
+	paintRows();
+	paintScope((stored[seenKey(origin)] as Seen[]) ?? []);
 
-	try {
-		const state = await readState(tabId);
-		panel.hidden = false;
-		paintRows();
-		paintScope(state.seen);
-	} catch (error) {
-		staleReason.textContent = error instanceof Error ? error.message : String(error);
-		stale.hidden = false;
-	}
-}
-
-async function readState(id: number): Promise<{ rules: ChaosRules; seen: Seen[] }> {
-	const [result] = await chrome.scripting.executeScript({
-		target: { tabId: id },
-		world: "MAIN",
-		func: () => window.__empeoInspector?.state() ?? null,
+	chrome.storage.onChanged.addListener((changes) => {
+		const next = changes[seenKey(origin)]?.newValue as Seen[] | undefined;
+		if (next) paintScope(next);
 	});
-
-	const state = result?.result as { rules: ChaosRules; seen: Seen[] } | null;
-	if (!state) throw new Error("ส่วนขยายยังไม่ได้เข้าไปในหน้านี้ — โหลดหน้าใหม่หนึ่งครั้ง");
-	return state;
 }
 
 function labelFor(url: string): string {
@@ -78,10 +63,12 @@ function paintScopeSelection(): void {
 
 function paintScope(seen: Seen[]): void {
 	if (seen.length === 0) {
-		scopeNote.textContent = "ยังไม่เห็น request — โหลดหน้าใหม่แล้วเปิดอีกครั้ง";
+		scopeNote.textContent = "ยังไม่เห็น request — โหลดหน้าใหม่หนึ่งครั้ง";
 		paintScopeSelection();
 		return;
 	}
+
+	scopeNote.textContent = "ตัวเลขคือจำนวนแถวที่เจอใน response นั้น";
 
 	const sorted = [...seen].sort((a, b) => (b.rows ?? -1) - (a.rows ?? -1));
 	const items = sorted.slice(0, 20).map((entry) => {
@@ -121,25 +108,8 @@ function paintScope(seen: Seen[]): void {
 	paintScopeSelection();
 }
 
-staleReload.addEventListener("click", () => {
-	if (tabId) chrome.tabs.reload(tabId);
-	window.close();
-});
-
 pickButton.addEventListener("click", () => {
-	if (!tabId) return;
-	void chrome.scripting
-		.executeScript({
-			target: { tabId },
-			world: "MAIN",
-			func: () => window.__empeoInspector?.pick(),
-		})
-		.then(() => window.close())
-		.catch((error: unknown) => {
-			staleReason.textContent = error instanceof Error ? error.message : String(error);
-			panel.hidden = true;
-			stale.hidden = false;
-		});
+	void chrome.storage.local.set({ [pickKey(origin)]: Date.now() }).then(() => window.close());
 });
 
 scopeList.addEventListener("click", (event) => {
@@ -149,7 +119,7 @@ scopeList.addEventListener("click", (event) => {
 	const value = button.dataset.scope ?? "";
 	rules = { ...rules, urlContains: value === "" ? null : value };
 	paintScopeSelection();
-	void chrome.storage.session.set({ [STORAGE_KEY]: rules });
+	void chrome.storage.local.set({ [RULES_KEY]: rules });
 });
 
 rowsGroup.addEventListener("click", (event) => {
@@ -160,7 +130,7 @@ rowsGroup.addEventListener("click", (event) => {
 	rules = { ...rules, rowCount: value === "off" ? null : Number(value) };
 	paintRows();
 
-	void chrome.storage.session.set({ [STORAGE_KEY]: rules }).then(() => {
+	void chrome.storage.local.set({ [RULES_KEY]: rules }).then(() => {
 		chrome.tabs.reload(tabId as number);
 		window.close();
 	});

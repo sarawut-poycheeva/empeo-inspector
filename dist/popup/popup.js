@@ -12,20 +12,24 @@
 
   // src/shared/types.ts
   var OFF = { rowCount: null, urlContains: null };
-  var STORAGE_KEY = "chaosRules";
+  var RULES_KEY = "chaosRules";
+  function seenKey(origin2) {
+    return `seen:${origin2}`;
+  }
+  function pickKey(origin2) {
+    return `pick:${origin2}`;
+  }
 
   // src/popup/popup.ts
   var env = document.getElementById("env");
   var blocked = document.getElementById("blocked");
-  var stale = document.getElementById("stale");
-  var staleReason = document.getElementById("staleReason");
-  var staleReload = document.getElementById("staleReload");
   var panel = document.getElementById("panel");
   var pickButton = document.getElementById("pick");
   var scopeList = document.getElementById("scope");
   var scopeNote = document.getElementById("scopeNote");
   var rowsGroup = document.getElementById("rows");
   var tabId;
+  var origin = "";
   var rules = OFF;
   void init();
   async function init() {
@@ -37,28 +41,17 @@
       blocked.hidden = false;
       return;
     }
+    origin = new URL(url).origin;
     env.textContent = labelFor(url);
-    const stored = await chrome.storage.session.get(STORAGE_KEY);
-    rules = stored[STORAGE_KEY] ?? OFF;
-    try {
-      const state = await readState(tabId);
-      panel.hidden = false;
-      paintRows();
-      paintScope(state.seen);
-    } catch (error) {
-      staleReason.textContent = error instanceof Error ? error.message : String(error);
-      stale.hidden = false;
-    }
-  }
-  async function readState(id) {
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: id },
-      world: "MAIN",
-      func: () => window.__empeoInspector?.state() ?? null
+    panel.hidden = false;
+    const stored = await chrome.storage.local.get([RULES_KEY, seenKey(origin)]);
+    rules = stored[RULES_KEY] ?? OFF;
+    paintRows();
+    paintScope(stored[seenKey(origin)] ?? []);
+    chrome.storage.onChanged.addListener((changes) => {
+      const next = changes[seenKey(origin)]?.newValue;
+      if (next) paintScope(next);
     });
-    const state = result?.result;
-    if (!state) throw new Error("\u0E2A\u0E48\u0E27\u0E19\u0E02\u0E22\u0E32\u0E22\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E40\u0E02\u0E49\u0E32\u0E44\u0E1B\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E19\u0E35\u0E49 \u2014 \u0E42\u0E2B\u0E25\u0E14\u0E2B\u0E19\u0E49\u0E32\u0E43\u0E2B\u0E21\u0E48\u0E2B\u0E19\u0E36\u0E48\u0E07\u0E04\u0E23\u0E31\u0E49\u0E07");
-    return state;
   }
   function labelFor(url) {
     const host = new URL(url).hostname;
@@ -79,10 +72,11 @@
   }
   function paintScope(seen) {
     if (seen.length === 0) {
-      scopeNote.textContent = "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E40\u0E2B\u0E47\u0E19 request \u2014 \u0E42\u0E2B\u0E25\u0E14\u0E2B\u0E19\u0E49\u0E32\u0E43\u0E2B\u0E21\u0E48\u0E41\u0E25\u0E49\u0E27\u0E40\u0E1B\u0E34\u0E14\u0E2D\u0E35\u0E01\u0E04\u0E23\u0E31\u0E49\u0E07";
+      scopeNote.textContent = "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E40\u0E2B\u0E47\u0E19 request \u2014 \u0E42\u0E2B\u0E25\u0E14\u0E2B\u0E19\u0E49\u0E32\u0E43\u0E2B\u0E21\u0E48\u0E2B\u0E19\u0E36\u0E48\u0E07\u0E04\u0E23\u0E31\u0E49\u0E07";
       paintScopeSelection();
       return;
     }
+    scopeNote.textContent = "\u0E15\u0E31\u0E27\u0E40\u0E25\u0E02\u0E04\u0E37\u0E2D\u0E08\u0E33\u0E19\u0E27\u0E19\u0E41\u0E16\u0E27\u0E17\u0E35\u0E48\u0E40\u0E08\u0E2D\u0E43\u0E19 response \u0E19\u0E31\u0E49\u0E19";
     const sorted = [...seen].sort((a, b) => (b.rows ?? -1) - (a.rows ?? -1));
     const items = sorted.slice(0, 20).map((entry) => {
       const button = document.createElement("button");
@@ -113,21 +107,8 @@
     scopeList.replaceChildren(...all ? [all, ...items] : items);
     paintScopeSelection();
   }
-  staleReload.addEventListener("click", () => {
-    if (tabId) chrome.tabs.reload(tabId);
-    window.close();
-  });
   pickButton.addEventListener("click", () => {
-    if (!tabId) return;
-    void chrome.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      func: () => window.__empeoInspector?.pick()
-    }).then(() => window.close()).catch((error) => {
-      staleReason.textContent = error instanceof Error ? error.message : String(error);
-      panel.hidden = true;
-      stale.hidden = false;
-    });
+    void chrome.storage.local.set({ [pickKey(origin)]: Date.now() }).then(() => window.close());
   });
   scopeList.addEventListener("click", (event) => {
     const button = event.target.closest("button");
@@ -135,7 +116,7 @@
     const value = button.dataset.scope ?? "";
     rules = { ...rules, urlContains: value === "" ? null : value };
     paintScopeSelection();
-    void chrome.storage.session.set({ [STORAGE_KEY]: rules });
+    void chrome.storage.local.set({ [RULES_KEY]: rules });
   });
   rowsGroup.addEventListener("click", (event) => {
     const button = event.target.closest("button");
@@ -143,7 +124,7 @@
     const value = button.dataset.count;
     rules = { ...rules, rowCount: value === "off" ? null : Number(value) };
     paintRows();
-    void chrome.storage.session.set({ [STORAGE_KEY]: rules }).then(() => {
+    void chrome.storage.local.set({ [RULES_KEY]: rules }).then(() => {
       chrome.tabs.reload(tabId);
       window.close();
     });
