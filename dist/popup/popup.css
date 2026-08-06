@@ -1,0 +1,200 @@
+:root {
+	--surface: #ffffff;
+	--surface-2: #e5e9ee;
+	--ink: #171a1f;
+	--ink-2: #4a5361;
+	--ink-3: #79828f;
+	--line: #d3d9e1;
+	--line-strong: #b9c2cd;
+	--accent: #c2610a;
+	--accent-soft: #fbeedd;
+	--ok: #1f7a50;
+	--mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--surface: #1c2027;
+		--surface-2: #242a33;
+		--ink: #e7ebf0;
+		--ink-2: #a3adba;
+		--ink-3: #6f7987;
+		--line: #2e353f;
+		--line-strong: #3d4650;
+		--accent: #f59331;
+		--accent-soft: #2c1f12;
+		--ok: #4fbe8b;
+	}
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	width: 296px;
+	margin: 0;
+	background: var(--surface);
+	color: var(--ink);
+	font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Thai", system-ui, sans-serif;
+}
+
+.bar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 11px 13px;
+	border-bottom: 1px solid var(--line);
+	background: var(--surface-2);
+}
+
+.bar strong {
+	font-size: 12.5px;
+}
+
+.env {
+	margin-left: auto;
+	font-family: var(--mono);
+	font-size: 10px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--ok);
+	border: 1px solid currentColor;
+	border-radius: 2px;
+	padding: 2px 6px;
+}
+
+.blocked {
+	padding: 18px 14px;
+}
+
+.blocked p {
+	margin: 0 0 6px;
+	color: var(--ink-2);
+}
+
+.hosts {
+	font-family: var(--mono);
+	font-size: 10.5px;
+	color: var(--ink-3);
+}
+
+section {
+	padding: 13px;
+	border-bottom: 1px solid var(--line);
+}
+
+h2 {
+	font-family: var(--mono);
+	font-size: 10px;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--ink-3);
+	font-weight: 500;
+	margin: 0 0 9px;
+}
+
+.seg {
+	display: flex;
+	border: 1px solid var(--line-strong);
+	border-radius: 5px;
+	overflow: hidden;
+}
+
+.seg button {
+	flex: 1;
+	font-family: var(--mono);
+	font-size: 11px;
+	padding: 6px 2px;
+	border: 0;
+	border-right: 1px solid var(--line);
+	background: var(--surface);
+	color: var(--ink-2);
+	cursor: pointer;
+}
+
+.seg button:last-child {
+	border-right: 0;
+}
+
+.seg button[aria-pressed="true"] {
+	background: var(--accent);
+	color: #fff;
+}
+
+.note {
+	margin: 9px 0 0;
+	font-size: 11.5px;
+	color: var(--ink-3);
+}
+
+.seen {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	max-height: 168px;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+
+.seen li {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	font-family: var(--mono);
+	font-size: 11px;
+	color: var(--ink-2);
+}
+
+.seen .path {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.seen .rows {
+	margin-left: auto;
+	flex: none;
+	color: var(--ink);
+	background: var(--accent-soft);
+	border-radius: 10px;
+	padding: 1px 7px;
+	font-variant-numeric: tabular-nums;
+}
+
+.seen .rows.none {
+	background: none;
+	color: var(--ink-3);
+}
+
+.muted {
+	color: var(--ink-3);
+}
+
+footer {
+	padding: 11px 13px;
+}
+
+footer button {
+	width: 100%;
+	font-family: var(--mono);
+	font-size: 11px;
+	padding: 7px;
+	border: 1px solid var(--line-strong);
+	border-radius: 5px;
+	background: var(--surface);
+	color: var(--ink-2);
+	cursor: pointer;
+}
+
+footer button:hover {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
+button:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: -2px;
+}
