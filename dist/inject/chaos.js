@@ -169,110 +169,178 @@
   var OFF = { rowCount: null, urlContains: null };
   var PORT = "empeo-inspector";
 
-  // src/inject/pick.ts
+  // src/inject/overlay.ts
   var ACCENT = "#c2610a";
   var MIN_TOKENS = 2;
   var MAX_TOKENS = 60;
-  var TOAST_MS = 3600;
-  var active = false;
-  function startPick(candidates, onPick) {
-    if (active || !document.body) return;
-    active = true;
-    const outline = element("div", [
+  var MAX_HOPS = 12;
+  var SETTLE_MS = 120;
+  var COUNTS = [
+    { label: "\u0E27\u0E48\u0E32\u0E07", value: 0 },
+    { label: "100", value: 100 },
+    { label: "1000", value: 1e3 }
+  ];
+  var teardown = null;
+  function isOpen() {
+    return teardown !== null;
+  }
+  function open(hooks) {
+    if (teardown || !document.body) return;
+    const outline = box(["position:fixed", `outline:2px solid ${ACCENT}`, `background:${ACCENT}14`, "display:none"]);
+    const badge = box([
       "position:fixed",
-      "z-index:2147483646",
-      `border:2px solid ${ACCENT}`,
-      `background:${ACCENT}1a`,
-      "pointer-events:none",
-      "display:none"
+      "z-index:2147483647",
+      "background:#14181e",
+      "color:#fff",
+      "font:500 11.5px/1.5 -apple-system,BlinkMacSystemFont,'Noto Sans Thai',sans-serif",
+      "border-radius:7px",
+      "padding:7px 9px",
+      "display:none",
+      "pointer-events:auto",
+      "box-shadow:0 8px 26px rgba(0,0,0,.45)",
+      "max-width:340px"
     ]);
-    const hint = element("div", [
+    const flag = box([
       "position:fixed",
-      "left:50%",
-      "bottom:24px",
-      "transform:translateX(-50%)",
+      "left:12px",
+      "bottom:12px",
       "z-index:2147483647",
       `background:${ACCENT}`,
       "color:#fff",
-      "font:600 12px/1.4 -apple-system,BlinkMacSystemFont,'Noto Sans Thai',sans-serif",
-      "padding:9px 15px",
-      "border-radius:6px",
-      "pointer-events:none",
-      "box-shadow:0 6px 20px rgba(0,0,0,.3)"
+      "font:600 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace",
+      "letter-spacing:.06em",
+      "border-radius:5px",
+      "padding:6px 10px"
     ]);
-    hint.textContent = "\u0E04\u0E25\u0E34\u0E01\u0E17\u0E35\u0E48\u0E15\u0E32\u0E23\u0E32\u0E07\u0E2B\u0E23\u0E37\u0E2D\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23 \xB7 \u0E01\u0E14 ESC \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E22\u0E01\u0E40\u0E25\u0E34\u0E01";
-    document.body.append(outline, hint);
-    const previousCursor = document.body.style.cursor;
-    document.body.style.cursor = "crosshair";
-    let target = null;
-    let queued = false;
-    let pointer = { x: 0, y: 0 };
+    flag.textContent = "\u0E42\u0E2B\u0E21\u0E14\u0E2A\u0E48\u0E2D\u0E07 \xB7 ESC \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E1B\u0E34\u0E14";
+    document.body.append(outline, badge, flag);
+    let subject = null;
+    let locked = false;
+    let settle;
     const onMove = (event) => {
-      pointer = { x: event.clientX, y: event.clientY };
-      if (queued) return;
-      queued = true;
-      requestAnimationFrame(() => {
-        queued = false;
-        target = subjectAt(pointer.x, pointer.y);
-        if (!target) {
-          outline.style.display = "none";
-          return;
-        }
-        const box = target.getBoundingClientRect();
-        Object.assign(outline.style, {
-          display: "block",
-          top: `${box.top}px`,
-          left: `${box.left}px`,
-          width: `${box.width}px`,
-          height: `${box.height}px`
-        });
-      });
+      if (locked) return;
+      const { clientX: x, clientY: y } = event;
+      clearTimeout(settle);
+      settle = setTimeout(() => update(x, y), SETTLE_MS);
     };
-    const swallow = (event) => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    };
-    const onClick = (event) => {
-      swallow(event);
-      const chosen = target ?? subjectAt(event.clientX, event.clientY);
-      const tokens = chosen ? tokensIn(chosen) : [];
-      const match = bestMatch(tokens, candidates());
-      finish();
-      if (match) {
-        toast(`\u0E40\u0E25\u0E37\u0E2D\u0E01 ${match.name} \u0E41\u0E25\u0E49\u0E27`);
-        onPick(match);
-      } else if (tokens.length === 0) {
-        toast("\u0E15\u0E23\u0E07\u0E19\u0E35\u0E49\u0E44\u0E21\u0E48\u0E21\u0E35\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E43\u0E2B\u0E49\u0E40\u0E17\u0E35\u0E22\u0E1A \u2014 \u0E25\u0E2D\u0E07\u0E04\u0E25\u0E34\u0E01\u0E17\u0E35\u0E48\u0E41\u0E16\u0E27\u0E43\u0E19\u0E15\u0E32\u0E23\u0E32\u0E07");
-      } else {
-        toast("\u0E44\u0E21\u0E48\u0E1E\u0E1A API \u0E17\u0E35\u0E48\u0E15\u0E23\u0E07\u0E01\u0E31\u0E1A\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E15\u0E23\u0E07\u0E19\u0E35\u0E49 \u2014 \u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E2D\u0E32\u0E08\u0E42\u0E2B\u0E25\u0E14\u0E21\u0E32\u0E01\u0E48\u0E2D\u0E19\u0E40\u0E1B\u0E34\u0E14\u0E40\u0E04\u0E23\u0E37\u0E48\u0E2D\u0E07\u0E21\u0E37\u0E2D");
+    const update = (x, y) => {
+      const found = subjectAt(x, y);
+      if (found === subject) return;
+      subject = found;
+      if (!found) {
+        outline.style.display = "none";
+        badge.style.display = "none";
+        return;
       }
+      const rect = found.getBoundingClientRect();
+      Object.assign(outline.style, {
+        display: "block",
+        top: `${rect.top}px`,
+        left: `${rect.left}px`,
+        width: `${rect.width}px`,
+        height: `${rect.height}px`
+      });
+      render(hooks.match(tokensIn(found)), rect);
+    };
+    const render = (hit, rect) => {
+      badge.replaceChildren();
+      if (!hit) {
+        badge.append(line("\u0E44\u0E21\u0E48\u0E23\u0E39\u0E49\u0E27\u0E48\u0E32\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E19\u0E35\u0E49\u0E21\u0E32\u0E08\u0E32\u0E01 API \u0E44\u0E2B\u0E19", "#9aa4b1"));
+        badge.append(line("\u0E25\u0E2D\u0E07\u0E0A\u0E35\u0E49\u0E17\u0E35\u0E48\u0E41\u0E16\u0E27\u0E43\u0E19\u0E15\u0E32\u0E23\u0E32\u0E07\u0E2B\u0E23\u0E37\u0E2D\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23", "#6f7987"));
+      } else {
+        const facts = [hit.name];
+        if (hit.rows !== null) facts.push(`${hit.rows.toLocaleString("en-US")} \u0E41\u0E16\u0E27`);
+        if (hit.durationMs !== null) facts.push(`${Math.round(hit.durationMs)} ms`);
+        badge.append(line(facts.join(" \xB7 "), "#fff"));
+        const row = box(["display:flex", "gap:5px", "margin-top:6px", "flex-wrap:wrap"]);
+        const applied = hooks.rowsFor(hit.name);
+        for (const count of COUNTS) {
+          row.append(
+            action(count.label, applied === count.value, () => {
+              hooks.apply(hit.name, count.value);
+            })
+          );
+        }
+        if (applied !== null) {
+          row.append(
+            action("\u0E04\u0E37\u0E19\u0E04\u0E48\u0E32", false, () => {
+              hooks.apply(hit.name, null);
+            })
+          );
+        }
+        badge.append(row);
+      }
+      badge.style.display = "block";
+      badge.style.visibility = "hidden";
+      requestAnimationFrame(() => {
+        const height = badge.offsetHeight;
+        const top = rect.top - height - 8 < 8 ? rect.bottom + 8 : rect.top - height - 8;
+        badge.style.top = `${Math.max(8, top)}px`;
+        badge.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - badge.offsetWidth - 8))}px`;
+        badge.style.visibility = "visible";
+      });
     };
     const onKey = (event) => {
       if (event.key !== "Escape") return;
-      swallow(event);
-      finish();
+      event.preventDefault();
+      hooks.close();
     };
-    const finish = () => {
+    badge.addEventListener("mouseenter", () => {
+      locked = true;
+    });
+    badge.addEventListener("mouseleave", () => {
+      locked = false;
+    });
+    document.addEventListener("mousemove", onMove, true);
+    document.addEventListener("keydown", onKey, true);
+    teardown = () => {
+      clearTimeout(settle);
       document.removeEventListener("mousemove", onMove, true);
-      document.removeEventListener("click", onClick, true);
-      document.removeEventListener("mousedown", swallow, true);
-      document.removeEventListener("pointerdown", swallow, true);
       document.removeEventListener("keydown", onKey, true);
       outline.remove();
-      hint.remove();
-      document.body.style.cursor = previousCursor;
-      active = false;
+      badge.remove();
+      flag.remove();
+      teardown = null;
     };
-    document.addEventListener("mousemove", onMove, true);
-    document.addEventListener("click", onClick, true);
-    document.addEventListener("mousedown", swallow, true);
-    document.addEventListener("pointerdown", swallow, true);
-    document.addEventListener("keydown", onKey, true);
+  }
+  function close() {
+    teardown?.();
+  }
+  function action(label, on, run) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.style.cssText = [
+      "pointer-events:auto",
+      "font:600 11px/1 -apple-system,BlinkMacSystemFont,'Noto Sans Thai',sans-serif",
+      "padding:5px 9px",
+      "border-radius:5px",
+      "cursor:pointer",
+      on ? `background:${ACCENT}` : "background:#242a33",
+      on ? "border:1px solid transparent" : "border:1px solid #333b46",
+      "color:#fff"
+    ].join(";");
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      run();
+    });
+    return button;
+  }
+  function line(text, color) {
+    const node = box([`color:${color}`, "white-space:nowrap", "overflow:hidden", "text-overflow:ellipsis"]);
+    node.textContent = text;
+    return node;
+  }
+  function box(styles) {
+    const node = document.createElement("div");
+    node.style.cssText = ["pointer-events:none", "z-index:2147483646", ...styles].join(";");
+    return node;
   }
   function subjectAt(x, y) {
     let node = document.elementFromPoint(x, y);
     let hops = 0;
-    while (node && node !== document.body && hops < 12) {
+    while (node && node !== document.body && hops < MAX_HOPS) {
       if (tokensIn(node).length >= MIN_TOKENS) return node;
       node = node.parentElement;
       hops++;
@@ -293,32 +361,6 @@
       node = walker.nextNode();
     }
     return out;
-  }
-  function element(tag, styles) {
-    const node = document.createElement(tag);
-    node.style.cssText = styles.join(";");
-    return node;
-  }
-  function toast(message) {
-    const node = element("div", [
-      "position:fixed",
-      "left:50%",
-      "bottom:24px",
-      "transform:translateX(-50%)",
-      "z-index:2147483647",
-      "background:#1c2027",
-      "color:#fff",
-      "font:600 12px/1.4 -apple-system,BlinkMacSystemFont,'Noto Sans Thai',sans-serif",
-      "padding:10px 16px",
-      "border-radius:6px",
-      "pointer-events:none",
-      "box-shadow:0 6px 20px rgba(0,0,0,.35)",
-      "max-width:80vw",
-      "text-align:center"
-    ]);
-    node.textContent = message;
-    document.body.append(node);
-    setTimeout(() => node.remove(), TOAST_MS);
   }
 
   // src/inject/chaos.ts
@@ -345,29 +387,40 @@
       const data = event.data;
       if (data?.port !== PORT) return;
       if (data.rules) {
-        setRules(data.rules);
+        rules = data.rules;
+        paint();
         release();
       }
-      if (data.action === "pick") {
-        startPick(
-          () => [...seen.values()].map(({ name, samples, rows }) => ({ name, samples, rows })),
-          (candidate) => {
-            setRules({ ...rules, urlContains: candidate.name });
-            window.postMessage({ port: PORT, picked: candidate.name }, "*");
-          }
-        );
+      if (typeof data.inspect === "boolean") {
+        if (data.inspect) openOverlay();
+        else close();
       }
+      if (data.applied) location.reload();
     });
     patchFetch();
     patchXhr();
-    function setRules(next) {
-      rules = next;
-      paint();
+    function openOverlay() {
+      if (isOpen()) return;
+      open({
+        match: (tokens) => {
+          const candidates = [...seen.values()].map(({ name, samples, rows }) => ({ name, samples, rows }));
+          const hit = bestMatch(tokens, candidates);
+          return hit ? seen.get(hit.name) ?? null : null;
+        },
+        rowsFor: (scope) => rules.urlContains === scope ? rules.rowCount : null,
+        apply: (scope, rowCount) => {
+          window.postMessage({ port: PORT, apply: { urlContains: rowCount === null ? null : scope, rowCount } }, "*");
+        },
+        close: () => {
+          close();
+          window.postMessage({ port: PORT, inspect: false }, "*");
+        }
+      });
     }
     function activeFor(url) {
       return rules.rowCount !== null && matchesScope(url, rules.urlContains);
     }
-    function record(url, text) {
+    function record(url, text, durationMs) {
       let parsed;
       try {
         parsed = JSON.parse(text);
@@ -378,23 +431,24 @@
         url,
         name: shortenUrl(url),
         rows: findPrimaryArray(parsed)?.length ?? null,
+        durationMs,
         samples: collectSamples(parsed)
       };
       const previous = seen.get(entry.name);
       if (previous && (previous.rows ?? -1) > (entry.rows ?? -1)) return;
       seen.set(entry.name, entry);
-      window.postMessage({ port: PORT, seen: entry }, "*");
     }
     function patchFetch() {
       const original = window.fetch;
       window.fetch = async function(...args) {
+        const started = performance.now();
         const response = await original.apply(this, args);
         const url = response.url || String(args[0]);
         if (SKIP_EXTENSION.test(url)) return response;
         if (!ready) await rulesReady;
         if (!isJsonResponse(response.headers.get("content-type"))) return response;
         const text = await response.clone().text();
-        record(url, text);
+        record(url, text, performance.now() - started);
         if (!activeFor(url)) return response;
         const next = transformJsonText(text, rules.rowCount);
         if (next === text) return response;
@@ -406,10 +460,11 @@
       };
     }
     function patchXhr() {
-      const open = XMLHttpRequest.prototype.open;
+      const open2 = XMLHttpRequest.prototype.open;
       XMLHttpRequest.prototype.open = function(method, url, ...rest) {
         const href = String(url);
         if (!SKIP_EXTENSION.test(href)) {
+          const started = performance.now();
           this.addEventListener("readystatechange", () => {
             if (this.readyState !== XMLHttpRequest.DONE) return;
             if (this.responseType !== "" && this.responseType !== "text") return;
@@ -420,7 +475,7 @@
               return;
             }
             if (!text || !isJsonResponse(this.getResponseHeader("content-type"))) return;
-            record(href, text);
+            record(href, text, performance.now() - started);
             if (!activeFor(href)) return;
             const next = transformJsonText(text, rules.rowCount);
             if (next === text) return;
@@ -428,7 +483,7 @@
             Object.defineProperty(this, "response", { value: next, configurable: true });
           });
         }
-        return open.call(this, method, url, ...rest);
+        return open2.call(this, method, url, ...rest);
       };
     }
     function paint() {
@@ -437,7 +492,7 @@
         if (rules.rowCount === null) return;
         const banner = document.createElement("div");
         banner.id = "empeo-inspector-banner";
-        banner.textContent = `CHAOS \xB7 ROWS = ${rules.rowCount.toLocaleString("en-US")} \xB7 ${rules.urlContains ?? "\u0E17\u0E31\u0E49\u0E07\u0E2B\u0E19\u0E49\u0E32"}`;
+        banner.textContent = `CHAOS \xB7 ${rules.urlContains} \xB7 ${rules.rowCount === 0 ? "\u0E27\u0E48\u0E32\u0E07" : `${rules.rowCount.toLocaleString("en-US")} \u0E41\u0E16\u0E27`}`;
         banner.style.cssText = [
           "position:fixed",
           "inset:0 0 auto 0",

@@ -7,7 +7,6 @@
 	--line: #d3d9e1;
 	--line-strong: #b9c2cd;
 	--accent: #c2610a;
-	--accent-soft: #fbeedd;
 	--ok: #1f7a50;
 	--mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -22,7 +21,6 @@
 		--line: #2e353f;
 		--line-strong: #3d4650;
 		--accent: #f59331;
-		--accent-soft: #2c1f12;
 		--ok: #4fbe8b;
 	}
 }
@@ -32,11 +30,11 @@
 }
 
 body {
-	width: 296px;
+	width: 288px;
 	margin: 0;
 	background: var(--surface);
 	color: var(--ink);
-	font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Thai", system-ui, sans-serif;
+	font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Thai", system-ui, sans-serif;
 }
 
 .bar {
@@ -73,11 +71,6 @@ body {
 	color: var(--ink-2);
 }
 
-.notice .pick {
-	margin-top: 10px;
-	margin-bottom: 0;
-}
-
 .hosts {
 	font-family: var(--mono);
 	font-size: 10.5px;
@@ -89,6 +82,10 @@ section {
 	border-bottom: 1px solid var(--line);
 }
 
+section:last-child {
+	border-bottom: 0;
+}
+
 h2 {
 	font-family: var(--mono);
 	font-size: 10px;
@@ -96,51 +93,16 @@ h2 {
 	text-transform: uppercase;
 	color: var(--ink-3);
 	font-weight: 500;
-	margin: 0 0 9px;
-}
-
-.seg {
-	display: flex;
-	border: 1px solid var(--line-strong);
-	border-radius: 5px;
-	overflow: hidden;
-}
-
-.seg button {
-	flex: 1;
-	font-family: var(--mono);
-	font-size: 11px;
-	padding: 6px 2px;
-	border: 0;
-	border-right: 1px solid var(--line);
-	background: var(--surface);
-	color: var(--ink-2);
-	cursor: pointer;
-}
-
-.seg button:last-child {
-	border-right: 0;
-}
-
-.seg button[aria-pressed="true"] {
-	background: var(--accent);
-	color: #fff;
-}
-
-.note {
-	margin: 9px 0 0;
-	font-size: 11.5px;
-	color: var(--ink-3);
+	margin: 0 0 7px;
 }
 
 .pick {
 	width: 100%;
-	font-size: 12px;
+	font-size: 13px;
 	font-weight: 600;
-	padding: 8px;
-	margin-bottom: 9px;
+	padding: 9px;
 	border: 1px solid var(--accent);
-	border-radius: 5px;
+	border-radius: 6px;
 	background: var(--accent);
 	color: #fff;
 	cursor: pointer;
@@ -150,86 +112,42 @@ h2 {
 	filter: brightness(1.08);
 }
 
-.scope {
-	list-style: none;
-	margin: 0;
-	padding: 0;
-	max-height: 216px;
-	overflow-y: auto;
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
+.pick.is-on {
+	background: none;
+	color: var(--accent);
 }
 
-.scope button {
-	width: 100%;
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
+.note {
+	margin: 9px 0 0;
+	font-size: 12px;
+	color: var(--ink-3);
+}
+
+.current {
+	margin: 0 0 9px;
 	font-family: var(--mono);
-	font-size: 11px;
-	text-align: left;
+	font-size: 11.5px;
+	color: var(--ink);
+	word-break: break-all;
+}
+
+.reset {
+	width: 100%;
+	font-size: 12px;
+	padding: 7px;
+	border: 1px solid var(--line-strong);
+	border-radius: 6px;
+	background: var(--surface);
 	color: var(--ink-2);
-	background: none;
-	border: 1px solid transparent;
-	border-radius: 4px;
-	padding: 5px 7px;
 	cursor: pointer;
 }
 
-.scope .head {
-	display: flex;
-	align-items: baseline;
-	gap: 8px;
-	width: 100%;
-}
-
-.scope .sample {
-	font-family: inherit;
-	font-size: 10.5px;
-	color: var(--ink-3);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	max-width: 100%;
-}
-
-.scope button:hover {
-	background: var(--surface-2);
-}
-
-.scope button[aria-pressed="true"] {
-	background: var(--accent-soft);
+.reset:hover {
 	border-color: var(--accent);
-	color: var(--ink);
-}
-
-.scope .path {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.scope .rows {
-	margin-left: auto;
-	flex: none;
-	color: var(--ink);
-	background: var(--surface-2);
-	border-radius: 10px;
-	padding: 1px 7px;
-	font-variant-numeric: tabular-nums;
-}
-
-.scope button[aria-pressed="true"] .rows {
-	background: var(--surface);
-}
-
-.scope .rows.none {
-	background: none;
-	color: var(--ink-3);
+	color: var(--accent);
 }
 
 button:focus-visible {
 	outline: 2px solid var(--accent);
-	outline-offset: -2px;
+	outline-offset: 2px;
 }

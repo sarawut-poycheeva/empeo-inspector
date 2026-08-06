@@ -1,9 +1,9 @@
 import { isAllowedOrigin } from "../shared/allowlist.ts";
-import { collectSamples } from "../shared/match.ts";
+import { bestMatch, collectSamples } from "../shared/match.ts";
 import { matchesScope, shortenUrl } from "../shared/scope.ts";
 import { findPrimaryArray, transformJsonText } from "../shared/transform.ts";
 import { OFF, PORT, type ChaosRules, type Seen } from "../shared/types.ts";
-import { startPick } from "./pick.ts";
+import * as overlay from "./overlay.ts";
 
 const SKIP_EXTENSION = /\.(js|mjs|css|map|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|eot)(\?|$)/i;
 const RULES_TIMEOUT_MS = 1000;
@@ -28,38 +28,50 @@ function install(): void {
 
 	window.addEventListener("message", (event) => {
 		if (event.source !== window) return;
-		const data = event.data as { port?: string; rules?: ChaosRules; action?: string } | null;
+		const data = event.data as { port?: string; rules?: ChaosRules; inspect?: boolean; applied?: boolean } | null;
 		if (data?.port !== PORT) return;
 
 		if (data.rules) {
-			setRules(data.rules);
+			rules = data.rules;
+			paint();
 			release();
 		}
 
-		if (data.action === "pick") {
-			startPick(
-				() => [...seen.values()].map(({ name, samples, rows }) => ({ name, samples, rows })),
-				(candidate) => {
-					setRules({ ...rules, urlContains: candidate.name });
-					window.postMessage({ port: PORT, picked: candidate.name }, "*");
-				},
-			);
+		if (typeof data.inspect === "boolean") {
+			if (data.inspect) openOverlay();
+			else overlay.close();
 		}
+
+		if (data.applied) location.reload();
 	});
 
 	patchFetch();
 	patchXhr();
 
-	function setRules(next: ChaosRules): void {
-		rules = next;
-		paint();
+	function openOverlay(): void {
+		if (overlay.isOpen()) return;
+		overlay.open({
+			match: (tokens) => {
+				const candidates = [...seen.values()].map(({ name, samples, rows }) => ({ name, samples, rows }));
+				const hit = bestMatch(tokens, candidates);
+				return hit ? (seen.get(hit.name) ?? null) : null;
+			},
+			rowsFor: (scope) => (rules.urlContains === scope ? rules.rowCount : null),
+			apply: (scope, rowCount) => {
+				window.postMessage({ port: PORT, apply: { urlContains: rowCount === null ? null : scope, rowCount } }, "*");
+			},
+			close: () => {
+				overlay.close();
+				window.postMessage({ port: PORT, inspect: false }, "*");
+			},
+		});
 	}
 
 	function activeFor(url: string): boolean {
 		return rules.rowCount !== null && matchesScope(url, rules.urlContains);
 	}
 
-	function record(url: string, text: string): void {
+	function record(url: string, text: string, durationMs: number): void {
 		let parsed: unknown;
 		try {
 			parsed = JSON.parse(text);
@@ -71,19 +83,19 @@ function install(): void {
 			url,
 			name: shortenUrl(url),
 			rows: findPrimaryArray(parsed)?.length ?? null,
+			durationMs,
 			samples: collectSamples(parsed),
 		};
 
 		const previous = seen.get(entry.name);
 		if (previous && (previous.rows ?? -1) > (entry.rows ?? -1)) return;
-
 		seen.set(entry.name, entry);
-		window.postMessage({ port: PORT, seen: entry }, "*");
 	}
 
 	function patchFetch(): void {
 		const original = window.fetch;
 		window.fetch = async function (this: unknown, ...args: Parameters<typeof fetch>) {
+			const started = performance.now();
 			const response = await original.apply(this, args);
 			const url = response.url || String(args[0]);
 			if (SKIP_EXTENSION.test(url)) return response;
@@ -92,7 +104,7 @@ function install(): void {
 			if (!isJsonResponse(response.headers.get("content-type"))) return response;
 
 			const text = await response.clone().text();
-			record(url, text);
+			record(url, text, performance.now() - started);
 			if (!activeFor(url)) return response;
 
 			const next = transformJsonText(text, rules.rowCount as number);
@@ -117,6 +129,7 @@ function install(): void {
 		) {
 			const href = String(url);
 			if (!SKIP_EXTENSION.test(href)) {
+				const started = performance.now();
 				this.addEventListener("readystatechange", () => {
 					if (this.readyState !== XMLHttpRequest.DONE) return;
 					if (this.responseType !== "" && this.responseType !== "text") return;
@@ -129,7 +142,7 @@ function install(): void {
 					}
 					if (!text || !isJsonResponse(this.getResponseHeader("content-type"))) return;
 
-					record(href, text);
+					record(href, text, performance.now() - started);
 					if (!activeFor(href)) return;
 
 					const next = transformJsonText(text, rules.rowCount as number);
@@ -150,7 +163,7 @@ function install(): void {
 
 			const banner = document.createElement("div");
 			banner.id = "empeo-inspector-banner";
-			banner.textContent = `CHAOS · ROWS = ${rules.rowCount.toLocaleString("en-US")} · ${rules.urlContains ?? "ทั้งหน้า"}`;
+			banner.textContent = `CHAOS · ${rules.urlContains} · ${rules.rowCount === 0 ? "ว่าง" : `${rules.rowCount.toLocaleString("en-US")} แถว`}`;
 			banner.style.cssText = [
 				"position:fixed",
 				"inset:0 0 auto 0",

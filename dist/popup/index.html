@@ -17,28 +17,17 @@
 
 		<main id="panel" hidden>
 			<section>
-				<h2>1 · แกล้งตรงไหน</h2>
-				<button class="pick" type="button" id="pick">คลิกเลือกจากหน้าจอ</button>
-				<ul class="scope" id="scope">
-					<li>
-						<button type="button" data-scope="" aria-pressed="true">
-							<span class="head"><span class="path">ทั้งหน้า</span></span>
-						</button>
-					</li>
-				</ul>
-				<p class="note" id="scopeNote">ตัวเลขคือจำนวนแถวที่เจอใน response นั้น</p>
+				<button class="pick" type="button" id="toggle">เปิดโหมดส่อง</button>
+				<p class="note">
+					เปิดแล้วเอาเมาส์ชี้อะไรบนหน้าเว็บก็ได้ จะบอกว่าข้อมูลนั้นมาจาก API ไหน กี่แถว ใช้เวลาเท่าไหร่
+					พร้อมปุ่มทำให้ว่างหรือเพิ่มแถวในป้ายเดียวกัน
+				</p>
 			</section>
 
-			<section>
-				<h2>2 · จำนวนแถว</h2>
-				<div class="seg" id="rows">
-					<button type="button" data-count="off" aria-pressed="true">ปิด</button>
-					<button type="button" data-count="0">0</button>
-					<button type="button" data-count="20">20</button>
-					<button type="button" data-count="100">100</button>
-					<button type="button" data-count="1000">1000</button>
-				</div>
-				<p class="note">กดแล้วหน้าเว็บจะโหลดใหม่ทันที</p>
+			<section id="active" hidden>
+				<h2>กำลังแกล้งอยู่</h2>
+				<p class="current" id="current"></p>
+				<button class="reset" type="button" id="reset">คืนค่าข้อมูลจริง</button>
 			</section>
 		</main>
 
