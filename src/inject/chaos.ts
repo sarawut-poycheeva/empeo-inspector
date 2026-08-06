@@ -1,6 +1,7 @@
 import { isAllowedOrigin } from "../shared/allowlist.ts";
-import { matchesScope } from "../shared/scope.ts";
-import { transformJsonText } from "../shared/transform.ts";
+import { collectSamples } from "../shared/match.ts";
+import { matchesScope, shortenUrl } from "../shared/scope.ts";
+import { findPrimaryArray, transformJsonText } from "../shared/transform.ts";
 import { OFF, PORT, type ChaosRules } from "../shared/types.ts";
 
 const SKIP_EXTENSION = /\.(js|mjs|css|map|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|eot)(\?|$)/i;
@@ -34,8 +35,25 @@ function install(): void {
 
 	const shouldSkip = (url: string) => SKIP_EXTENSION.test(url);
 
-	const announce = (url: string, rows: number | null) => {
-		window.postMessage({ port: PORT, seen: { url, rows } }, "*");
+	const announce = (url: string, text: string) => {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(text);
+		} catch {
+			return;
+		}
+		window.postMessage(
+			{
+				port: PORT,
+				seen: {
+					url,
+					name: shortenUrl(url),
+					rows: findPrimaryArray(parsed)?.length ?? null,
+					samples: collectSamples(parsed),
+				},
+			},
+			"*",
+		);
 	};
 
 	patchFetch();
@@ -52,7 +70,7 @@ function install(): void {
 			if (!isJsonResponse(response.headers.get("content-type"))) return response;
 
 			const text = await response.clone().text();
-			announce(url, rowsIn(text));
+			announce(url, text);
 			if (!activeFor(url)) return response;
 
 			const next = transformJsonText(text, rules.rowCount as number);
@@ -76,8 +94,6 @@ function install(): void {
 			...rest: unknown[]
 		) {
 			const href = String(url);
-			// Registering here — before the caller attaches its own handlers — is what
-			// lets the rewrite land ahead of Angular reading the body.
 			if (!shouldSkip(href)) {
 				this.addEventListener("readystatechange", () => {
 					if (this.readyState !== XMLHttpRequest.DONE) return;
@@ -91,7 +107,7 @@ function install(): void {
 					}
 					if (!text || !isJsonResponse(this.getResponseHeader("content-type"))) return;
 
-					announce(href, rowsIn(text));
+					announce(href, text);
 					if (!activeFor(href)) return;
 
 					const next = transformJsonText(text, rules.rowCount as number);
@@ -108,27 +124,4 @@ function install(): void {
 
 function isJsonResponse(contentType: string | null): boolean {
 	return !!contentType && contentType.toLowerCase().includes("json");
-}
-
-function rowsIn(text: string): number | null {
-	try {
-		const parsed: unknown = JSON.parse(text);
-		return findLongest(parsed);
-	} catch {
-		return null;
-	}
-}
-
-function findLongest(node: unknown, depth = 0): number | null {
-	if (depth > 8 || node === null || typeof node !== "object") return null;
-	let best: number | null = null;
-	const children = Array.isArray(node) ? node : Object.values(node as Record<string, unknown>);
-	if (Array.isArray(node) && node.length > 0 && typeof node[0] === "object" && node[0] !== null) {
-		best = node.length;
-	}
-	for (const child of children) {
-		const found = findLongest(child, depth + 1);
-		if (found !== null && (best === null || found > best)) best = found;
-	}
-	return best;
 }

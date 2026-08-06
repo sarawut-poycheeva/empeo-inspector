@@ -10,28 +10,21 @@
     }
   }
 
-  // src/shared/scope.ts
-  function shortenUrl(url) {
-    try {
-      const segments = new URL(url).pathname.split("/").filter(Boolean);
-      return segments.slice(-2).join("/") || url;
-    } catch {
-      return url;
-    }
-  }
-
   // src/shared/types.ts
   var OFF = { rowCount: null, urlContains: null };
   var STORAGE_KEY = "chaosRules";
   var MSG = {
     getRules: "empeo-inspector:get-rules",
-    setRules: "empeo-inspector:set-rules"
+    setRules: "empeo-inspector:set-rules",
+    startPick: "empeo-inspector:start-pick",
+    openPopup: "empeo-inspector:open-popup"
   };
 
   // src/popup/popup.ts
   var env = document.getElementById("env");
   var blocked = document.getElementById("blocked");
   var panel = document.getElementById("panel");
+  var pickButton = document.getElementById("pick");
   var scopeList = document.getElementById("scope");
   var scopeNote = document.getElementById("scopeNote");
   var rowsGroup = document.getElementById("rows");
@@ -75,29 +68,33 @@
     }
   }
   function paintScope(seen) {
-    const byName = /* @__PURE__ */ new Map();
-    for (const entry of seen) {
-      const name = shortenUrl(entry.url);
-      const previous = byName.get(name);
-      if (previous === void 0 || (entry.rows ?? -1) > (previous ?? -1)) byName.set(name, entry.rows);
-    }
-    if (byName.size === 0) {
+    if (seen.length === 0) {
       scopeNote.textContent = "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E40\u0E2B\u0E47\u0E19 request \u2014 \u0E42\u0E2B\u0E25\u0E14\u0E2B\u0E19\u0E49\u0E32\u0E43\u0E2B\u0E21\u0E48\u0E41\u0E25\u0E49\u0E27\u0E40\u0E1B\u0E34\u0E14\u0E2D\u0E35\u0E01\u0E04\u0E23\u0E31\u0E49\u0E07";
       paintScopeSelection();
       return;
     }
-    const sorted = [...byName.entries()].sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1));
-    const items = sorted.slice(0, 20).map(([name, rows]) => {
+    const sorted = [...seen].sort((a, b) => (b.rows ?? -1) - (a.rows ?? -1));
+    const items = sorted.slice(0, 20).map((entry) => {
       const button = document.createElement("button");
       button.type = "button";
-      button.dataset.scope = name;
+      button.dataset.scope = entry.name;
+      const head = document.createElement("span");
+      head.className = "head";
       const path = document.createElement("span");
       path.className = "path";
-      path.textContent = name;
+      path.textContent = entry.name;
       const count = document.createElement("span");
-      count.className = rows === null ? "rows none" : "rows";
-      count.textContent = rows === null ? "\u2014" : rows.toLocaleString("en-US");
-      button.append(path, count);
+      count.className = entry.rows === null ? "rows none" : "rows";
+      count.textContent = entry.rows === null ? "\u2014" : entry.rows.toLocaleString("en-US");
+      head.append(path, count);
+      button.append(head);
+      const preview = entry.samples.slice(0, 3).join(" \xB7 ");
+      if (preview) {
+        const sample = document.createElement("span");
+        sample.className = "sample";
+        sample.textContent = preview;
+        button.append(sample);
+      }
       const item = document.createElement("li");
       item.append(button);
       return item;
@@ -106,6 +103,11 @@
     scopeList.replaceChildren(...all ? [all, ...items] : items);
     paintScopeSelection();
   }
+  pickButton.addEventListener("click", () => {
+    if (!tabId) return;
+    chrome.tabs.sendMessage(tabId, { type: MSG.startPick }, () => void chrome.runtime.lastError);
+    window.close();
+  });
   scopeList.addEventListener("click", (event) => {
     const button = event.target.closest("button");
     if (!button) return;

@@ -1,15 +1,10 @@
 import { isAllowedOrigin } from "../shared/allowlist.ts";
-import { shortenUrl } from "../shared/scope.ts";
-import { MSG, OFF, STORAGE_KEY, type ChaosRules } from "../shared/types.ts";
-
-interface Seen {
-	url: string;
-	rows: number | null;
-}
+import { MSG, OFF, STORAGE_KEY, type ChaosRules, type Seen } from "../shared/types.ts";
 
 const env = document.getElementById("env") as HTMLElement;
 const blocked = document.getElementById("blocked") as HTMLElement;
 const panel = document.getElementById("panel") as HTMLElement;
+const pickButton = document.getElementById("pick") as HTMLButtonElement;
 const scopeList = document.getElementById("scope") as HTMLElement;
 const scopeNote = document.getElementById("scopeNote") as HTMLElement;
 const rowsGroup = document.getElementById("rows") as HTMLElement;
@@ -64,34 +59,40 @@ function paintScopeSelection(): void {
 }
 
 function paintScope(seen: Seen[]): void {
-	const byName = new Map<string, number | null>();
-	for (const entry of seen) {
-		const name = shortenUrl(entry.url);
-		const previous = byName.get(name);
-		if (previous === undefined || (entry.rows ?? -1) > (previous ?? -1)) byName.set(name, entry.rows);
-	}
-
-	if (byName.size === 0) {
+	if (seen.length === 0) {
 		scopeNote.textContent = "ยังไม่เห็น request — โหลดหน้าใหม่แล้วเปิดอีกครั้ง";
 		paintScopeSelection();
 		return;
 	}
 
-	const sorted = [...byName.entries()].sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1));
-	const items = sorted.slice(0, 20).map(([name, rows]) => {
+	const sorted = [...seen].sort((a, b) => (b.rows ?? -1) - (a.rows ?? -1));
+	const items = sorted.slice(0, 20).map((entry) => {
 		const button = document.createElement("button");
 		button.type = "button";
-		button.dataset.scope = name;
+		button.dataset.scope = entry.name;
+
+		const head = document.createElement("span");
+		head.className = "head";
 
 		const path = document.createElement("span");
 		path.className = "path";
-		path.textContent = name;
+		path.textContent = entry.name;
 
 		const count = document.createElement("span");
-		count.className = rows === null ? "rows none" : "rows";
-		count.textContent = rows === null ? "—" : rows.toLocaleString("en-US");
+		count.className = entry.rows === null ? "rows none" : "rows";
+		count.textContent = entry.rows === null ? "—" : entry.rows.toLocaleString("en-US");
 
-		button.append(path, count);
+		head.append(path, count);
+		button.append(head);
+
+		const preview = entry.samples.slice(0, 3).join(" · ");
+		if (preview) {
+			const sample = document.createElement("span");
+			sample.className = "sample";
+			sample.textContent = preview;
+			button.append(sample);
+		}
+
 		const item = document.createElement("li");
 		item.append(button);
 		return item;
@@ -101,6 +102,12 @@ function paintScope(seen: Seen[]): void {
 	scopeList.replaceChildren(...(all ? [all, ...items] : items));
 	paintScopeSelection();
 }
+
+pickButton.addEventListener("click", () => {
+	if (!tabId) return;
+	chrome.tabs.sendMessage(tabId, { type: MSG.startPick }, () => void chrome.runtime.lastError);
+	window.close();
+});
 
 scopeList.addEventListener("click", (event) => {
 	const button = (event.target as HTMLElement).closest("button");

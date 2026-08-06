@@ -10,10 +10,48 @@
     }
   }
 
+  // src/shared/match.ts
+  var MIN_LENGTH = 2;
+  var MAX_LENGTH = 80;
+  function normalise(text) {
+    return text.trim().replace(/\s+/g, " ").toLowerCase();
+  }
+  function collectSamples(value, limit = 150) {
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    const visit = (node, depth) => {
+      if (out.length >= limit || depth > 8) return;
+      if (typeof node === "string") {
+        const text = normalise(node);
+        if (text.length < MIN_LENGTH || text.length > MAX_LENGTH || seen.has(text)) return;
+        seen.add(text);
+        out.push(text);
+        return;
+      }
+      if (Array.isArray(node)) {
+        for (const child of node) visit(child, depth + 1);
+        return;
+      }
+      if (node !== null && typeof node === "object") {
+        for (const child of Object.values(node)) visit(child, depth + 1);
+      }
+    };
+    visit(value, 0);
+    return out;
+  }
+
   // src/shared/scope.ts
   function matchesScope(url, urlContains) {
     if (!urlContains) return true;
     return url.toLowerCase().includes(urlContains.toLowerCase());
+  }
+  function shortenUrl(url) {
+    try {
+      const segments = new URL(url).pathname.split("/").filter(Boolean);
+      return segments.slice(-2).join("/") || url;
+    } catch {
+      return url;
+    }
   }
 
   // src/shared/transform.ts
@@ -137,8 +175,25 @@
     });
     const activeFor = (url) => rules.rowCount !== null && matchesScope(url, rules.urlContains);
     const shouldSkip = (url) => SKIP_EXTENSION.test(url);
-    const announce = (url, rows) => {
-      window.postMessage({ port: PORT, seen: { url, rows } }, "*");
+    const announce = (url, text) => {
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        return;
+      }
+      window.postMessage(
+        {
+          port: PORT,
+          seen: {
+            url,
+            name: shortenUrl(url),
+            rows: findPrimaryArray(parsed)?.length ?? null,
+            samples: collectSamples(parsed)
+          }
+        },
+        "*"
+      );
     };
     patchFetch();
     patchXhr();
@@ -151,7 +206,7 @@
         if (!ready) await rulesReady;
         if (!isJsonResponse(response.headers.get("content-type"))) return response;
         const text = await response.clone().text();
-        announce(url, rowsIn(text));
+        announce(url, text);
         if (!activeFor(url)) return response;
         const next = transformJsonText(text, rules.rowCount);
         if (next === text) return response;
@@ -177,7 +232,7 @@
               return;
             }
             if (!text || !isJsonResponse(this.getResponseHeader("content-type"))) return;
-            announce(href, rowsIn(text));
+            announce(href, text);
             if (!activeFor(href)) return;
             const next = transformJsonText(text, rules.rowCount);
             if (next === text) return;
@@ -191,26 +246,5 @@
   }
   function isJsonResponse(contentType) {
     return !!contentType && contentType.toLowerCase().includes("json");
-  }
-  function rowsIn(text) {
-    try {
-      const parsed = JSON.parse(text);
-      return findLongest(parsed);
-    } catch {
-      return null;
-    }
-  }
-  function findLongest(node, depth = 0) {
-    if (depth > 8 || node === null || typeof node !== "object") return null;
-    let best = null;
-    const children = Array.isArray(node) ? node : Object.values(node);
-    if (Array.isArray(node) && node.length > 0 && typeof node[0] === "object" && node[0] !== null) {
-      best = node.length;
-    }
-    for (const child of children) {
-      const found = findLongest(child, depth + 1);
-      if (found !== null && (best === null || found > best)) best = found;
-    }
-    return best;
   }
 })();
