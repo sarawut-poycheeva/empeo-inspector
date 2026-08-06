@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# dist/ is committed on purpose — teammates load the unpacked extension
+# straight from this repo, so `git pull` alone must be enough to update it.
