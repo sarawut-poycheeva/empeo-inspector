@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   // src/shared/types.ts
-  var OFF = { rowCount: null };
+  var OFF = { rowCount: null, urlContains: null };
   var STORAGE_KEY = "chaosRules";
   var MSG = {
     getRules: "empeo-inspector:get-rules",

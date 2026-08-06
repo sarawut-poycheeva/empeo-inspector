@@ -10,6 +10,12 @@
     }
   }
 
+  // src/shared/scope.ts
+  function matchesScope(url, urlContains) {
+    if (!urlContains) return true;
+    return url.toLowerCase().includes(urlContains.toLowerCase());
+  }
+
   // src/shared/transform.ts
   var IDENTITY_KEY = /(^|[a-z])(id|no|guid|key|code)$/i;
   var TOTAL_KEY = /^(total|totalcount|totalrecords|totalitems|totalrows|count|recordcount|itemcount|rowcount)$/i;
@@ -102,7 +108,7 @@
   }
 
   // src/shared/types.ts
-  var OFF = { rowCount: null };
+  var OFF = { rowCount: null, urlContains: null };
   var PORT = "empeo-inspector";
 
   // src/inject/chaos.ts
@@ -129,7 +135,7 @@
       rules = data.rules;
       release();
     });
-    const active = () => rules.rowCount !== null;
+    const activeFor = (url) => rules.rowCount !== null && matchesScope(url, rules.urlContains);
     const shouldSkip = (url) => SKIP_EXTENSION.test(url);
     const announce = (url, rows) => {
       window.postMessage({ port: PORT, seen: { url, rows } }, "*");
@@ -146,7 +152,7 @@
         if (!isJsonResponse(response.headers.get("content-type"))) return response;
         const text = await response.clone().text();
         announce(url, rowsIn(text));
-        if (!active()) return response;
+        if (!activeFor(url)) return response;
         const next = transformJsonText(text, rules.rowCount);
         if (next === text) return response;
         return new Response(next, {
@@ -172,7 +178,7 @@
             }
             if (!text || !isJsonResponse(this.getResponseHeader("content-type"))) return;
             announce(href, rowsIn(text));
-            if (!active()) return;
+            if (!activeFor(href)) return;
             const next = transformJsonText(text, rules.rowCount);
             if (next === text) return;
             Object.defineProperty(this, "responseText", { value: next, configurable: true });

@@ -17,7 +17,19 @@
 
 		<main id="panel" hidden>
 			<section>
-				<h2>จำนวนแถว</h2>
+				<h2>1 · แกล้งตรงไหน</h2>
+				<ul class="scope" id="scope">
+					<li>
+						<button type="button" data-scope="" aria-pressed="true">
+							<span class="path">ทั้งหน้า</span>
+						</button>
+					</li>
+				</ul>
+				<p class="note" id="scopeNote">ตัวเลขคือจำนวนแถวที่เจอใน response นั้น</p>
+			</section>
+
+			<section>
+				<h2>2 · จำนวนแถว</h2>
 				<div class="seg" id="rows">
 					<button type="button" data-count="off" aria-pressed="true">ปิด</button>
 					<button type="button" data-count="0">0</button>
@@ -25,19 +37,8 @@
 					<button type="button" data-count="100">100</button>
 					<button type="button" data-count="1000">1000</button>
 				</div>
-				<p class="note">มีผลกับข้อมูลที่โหลดใหม่เท่านั้น</p>
+				<p class="note">กดแล้วหน้าเว็บจะโหลดใหม่ทันที</p>
 			</section>
-
-			<section>
-				<h2>เห็น request อะไรบ้าง</h2>
-				<ul class="seen" id="seen">
-					<li class="muted">ยังไม่เห็น request — ลองโหลดหน้าใหม่</li>
-				</ul>
-			</section>
-
-			<footer>
-				<button type="button" id="reload">โหลดหน้าใหม่</button>
-			</footer>
 		</main>
 
 		<script src="popup.js"></script>

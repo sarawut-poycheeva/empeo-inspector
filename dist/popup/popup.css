@@ -128,70 +128,66 @@ h2 {
 	color: var(--ink-3);
 }
 
-.seen {
+.scope {
 	list-style: none;
 	margin: 0;
 	padding: 0;
-	max-height: 168px;
+	max-height: 190px;
 	overflow-y: auto;
 	display: flex;
 	flex-direction: column;
-	gap: 5px;
+	gap: 2px;
 }
 
-.seen li {
+.scope button {
+	width: 100%;
 	display: flex;
 	align-items: baseline;
 	gap: 8px;
 	font-family: var(--mono);
 	font-size: 11px;
+	text-align: left;
 	color: var(--ink-2);
+	background: none;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	padding: 4px 7px;
+	cursor: pointer;
 }
 
-.seen .path {
+.scope button:hover {
+	background: var(--surface-2);
+}
+
+.scope button[aria-pressed="true"] {
+	background: var(--accent-soft);
+	border-color: var(--accent);
+	color: var(--ink);
+}
+
+.scope .path {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.seen .rows {
+.scope .rows {
 	margin-left: auto;
 	flex: none;
 	color: var(--ink);
-	background: var(--accent-soft);
+	background: var(--surface-2);
 	border-radius: 10px;
 	padding: 1px 7px;
 	font-variant-numeric: tabular-nums;
 }
 
-.seen .rows.none {
+.scope button[aria-pressed="true"] .rows {
+	background: var(--surface);
+}
+
+.scope .rows.none {
 	background: none;
 	color: var(--ink-3);
-}
-
-.muted {
-	color: var(--ink-3);
-}
-
-footer {
-	padding: 11px 13px;
-}
-
-footer button {
-	width: 100%;
-	font-family: var(--mono);
-	font-size: 11px;
-	padding: 7px;
-	border: 1px solid var(--line-strong);
-	border-radius: 5px;
-	background: var(--surface);
-	color: var(--ink-2);
-	cursor: pointer;
-}
-
-footer button:hover {
-	border-color: var(--accent);
-	color: var(--accent);
 }
 
 button:focus-visible {

@@ -1,4 +1,5 @@
 import { isAllowedOrigin } from "../shared/allowlist.ts";
+import { matchesScope } from "../shared/scope.ts";
 import { transformJsonText } from "../shared/transform.ts";
 import { OFF, PORT, type ChaosRules } from "../shared/types.ts";
 
@@ -29,7 +30,7 @@ function install(): void {
 		release();
 	});
 
-	const active = () => rules.rowCount !== null;
+	const activeFor = (url: string) => rules.rowCount !== null && matchesScope(url, rules.urlContains);
 
 	const shouldSkip = (url: string) => SKIP_EXTENSION.test(url);
 
@@ -52,7 +53,7 @@ function install(): void {
 
 			const text = await response.clone().text();
 			announce(url, rowsIn(text));
-			if (!active()) return response;
+			if (!activeFor(url)) return response;
 
 			const next = transformJsonText(text, rules.rowCount as number);
 			if (next === text) return response;
@@ -91,7 +92,7 @@ function install(): void {
 					if (!text || !isJsonResponse(this.getResponseHeader("content-type"))) return;
 
 					announce(href, rowsIn(text));
-					if (!active()) return;
+					if (!activeFor(href)) return;
 
 					const next = transformJsonText(text, rules.rowCount as number);
 					if (next === text) return;

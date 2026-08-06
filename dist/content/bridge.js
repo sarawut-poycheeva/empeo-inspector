@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   // src/shared/types.ts
-  var OFF = { rowCount: null };
+  var OFF = { rowCount: null, urlContains: null };
   var MSG = {
     getRules: "empeo-inspector:get-rules",
     setRules: "empeo-inspector:set-rules"
@@ -45,7 +45,7 @@
       if (!on) return;
       const banner = document.createElement("div");
       banner.id = "empeo-inspector-banner";
-      banner.textContent = `CHAOS \xB7 ROWS = ${rules.rowCount?.toLocaleString("en-US")}`;
+      banner.textContent = `CHAOS \xB7 ROWS = ${rules.rowCount?.toLocaleString("en-US")} \xB7 ${rules.urlContains ?? "\u0E17\u0E31\u0E49\u0E07\u0E2B\u0E19\u0E49\u0E32"}`;
       banner.style.cssText = [
         "position:fixed",
         "inset:0 0 auto 0",

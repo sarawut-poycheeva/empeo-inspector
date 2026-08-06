@@ -10,8 +10,18 @@
     }
   }
 
+  // src/shared/scope.ts
+  function shortenUrl(url) {
+    try {
+      const segments = new URL(url).pathname.split("/").filter(Boolean);
+      return segments.slice(-2).join("/") || url;
+    } catch {
+      return url;
+    }
+  }
+
   // src/shared/types.ts
-  var OFF = { rowCount: null };
+  var OFF = { rowCount: null, urlContains: null };
   var STORAGE_KEY = "chaosRules";
   var MSG = {
     getRules: "empeo-inspector:get-rules",
@@ -22,10 +32,11 @@
   var env = document.getElementById("env");
   var blocked = document.getElementById("blocked");
   var panel = document.getElementById("panel");
+  var scopeList = document.getElementById("scope");
+  var scopeNote = document.getElementById("scopeNote");
   var rowsGroup = document.getElementById("rows");
-  var seenList = document.getElementById("seen");
-  var reload = document.getElementById("reload");
   var tabId;
+  var rules = OFF;
   void init();
   async function init() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -39,10 +50,11 @@
     env.textContent = labelFor(url);
     panel.hidden = false;
     const stored = await chrome.storage.session.get(STORAGE_KEY);
-    paintRules(stored[STORAGE_KEY] ?? OFF);
+    rules = stored[STORAGE_KEY] ?? OFF;
+    paintRows();
     chrome.tabs.sendMessage(tabId, { type: MSG.getRules }, (response) => {
       if (chrome.runtime.lastError) return;
-      paintSeen(response?.seen ?? []);
+      paintScope(response?.seen ?? []);
     });
   }
   function labelFor(url) {
@@ -51,49 +63,76 @@
     if (host === "portal.dev.empeo.com") return "dev";
     return "local";
   }
-  function paintRules(rules) {
+  function paintRows() {
     const current = rules.rowCount === null ? "off" : String(rules.rowCount);
     for (const button of rowsGroup.querySelectorAll("button")) {
       button.setAttribute("aria-pressed", String(button.dataset.count === current));
     }
   }
-  function paintSeen(seen) {
-    if (seen.length === 0) return;
-    const sorted = [...seen].sort((a, b) => (b.rows ?? -1) - (a.rows ?? -1));
-    seenList.replaceChildren(
-      ...sorted.slice(0, 25).map((entry) => {
-        const item = document.createElement("li");
-        const path = document.createElement("span");
-        path.className = "path";
-        path.textContent = shorten(entry.url);
-        path.title = entry.url;
-        const rows = document.createElement("span");
-        rows.className = entry.rows === null ? "rows none" : "rows";
-        rows.textContent = entry.rows === null ? "\u2014" : entry.rows.toLocaleString("en-US");
-        item.append(path, rows);
-        return item;
-      })
-    );
-  }
-  function shorten(url) {
-    try {
-      const segments = new URL(url).pathname.split("/").filter(Boolean);
-      return segments.slice(-2).join("/") || url;
-    } catch {
-      return url;
+  function paintScopeSelection() {
+    for (const button of scopeList.querySelectorAll("button")) {
+      button.setAttribute("aria-pressed", String((button.dataset.scope ?? "") === (rules.urlContains ?? "")));
     }
   }
+  function paintScope(seen) {
+    const byName = /* @__PURE__ */ new Map();
+    for (const entry of seen) {
+      const name = shortenUrl(entry.url);
+      const previous = byName.get(name);
+      if (previous === void 0 || (entry.rows ?? -1) > (previous ?? -1)) byName.set(name, entry.rows);
+    }
+    if (byName.size === 0) {
+      scopeNote.textContent = "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E40\u0E2B\u0E47\u0E19 request \u2014 \u0E42\u0E2B\u0E25\u0E14\u0E2B\u0E19\u0E49\u0E32\u0E43\u0E2B\u0E21\u0E48\u0E41\u0E25\u0E49\u0E27\u0E40\u0E1B\u0E34\u0E14\u0E2D\u0E35\u0E01\u0E04\u0E23\u0E31\u0E49\u0E07";
+      paintScopeSelection();
+      return;
+    }
+    const sorted = [...byName.entries()].sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1));
+    const items = sorted.slice(0, 20).map(([name, rows]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.scope = name;
+      const path = document.createElement("span");
+      path.className = "path";
+      path.textContent = name;
+      const count = document.createElement("span");
+      count.className = rows === null ? "rows none" : "rows";
+      count.textContent = rows === null ? "\u2014" : rows.toLocaleString("en-US");
+      button.append(path, count);
+      const item = document.createElement("li");
+      item.append(button);
+      return item;
+    });
+    const all = scopeList.querySelector("li");
+    scopeList.replaceChildren(...all ? [all, ...items] : items);
+    paintScopeSelection();
+  }
+  scopeList.addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    const value = button.dataset.scope ?? "";
+    rules = { ...rules, urlContains: value === "" ? null : value };
+    paintScopeSelection();
+    void save();
+  });
   rowsGroup.addEventListener("click", (event) => {
     const button = event.target.closest("button");
     if (!button || !tabId) return;
     const value = button.dataset.count;
-    const rules = { rowCount: value === "off" ? null : Number(value) };
-    void chrome.storage.session.set({ [STORAGE_KEY]: rules });
-    chrome.tabs.sendMessage(tabId, { type: MSG.setRules, rules }, () => void chrome.runtime.lastError);
-    paintRules(rules);
+    rules = { ...rules, rowCount: value === "off" ? null : Number(value) };
+    paintRows();
+    void save().then(() => {
+      chrome.tabs.reload(tabId);
+      window.close();
+    });
   });
-  reload.addEventListener("click", () => {
-    if (tabId) chrome.tabs.reload(tabId);
-    window.close();
-  });
+  async function save() {
+    await chrome.storage.session.set({ [STORAGE_KEY]: rules });
+    if (!tabId) return;
+    await new Promise((resolve) => {
+      chrome.tabs.sendMessage(tabId, { type: MSG.setRules, rules }, () => {
+        void chrome.runtime.lastError;
+        resolve();
+      });
+    });
+  }
 })();

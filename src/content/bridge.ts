@@ -47,7 +47,9 @@ function paint(): void {
 
 		const banner = document.createElement("div");
 		banner.id = "empeo-inspector-banner";
-		banner.textContent = `CHAOS · ROWS = ${rules.rowCount?.toLocaleString("en-US")}`;
+		banner.textContent =
+			`CHAOS · ROWS = ${rules.rowCount?.toLocaleString("en-US")}` +
+			` · ${rules.urlContains ?? "ทั้งหน้า"}`;
 		banner.style.cssText = [
 			"position:fixed",
 			"inset:0 0 auto 0",
