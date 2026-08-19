@@ -1,47 +1,10 @@
 {
 	"manifest_version": 3,
-	"name": "empeo Inspector",
-	"version": "0.1.0",
-	"description": "ตรวจและควบคุมพฤติกรรมของ empeo ตอน runtime",
-	"permissions": ["storage"],
-	"host_permissions": [
-		"http://localhost/*",
-		"http://127.0.0.1/*",
-		"https://portal.dev.empeo.com/*",
-		"https://portal.uat.empeo.com/*"
-	],
-	"background": {
-		"service_worker": "background.js",
-		"type": "module"
-	},
+	"name": "Gofive DS Colors",
+	"version": "0.2.0",
+	"description": "Paste a hex or box-shadow, get the Gofive design system token to use.",
 	"action": {
 		"default_popup": "popup/index.html",
-		"default_title": "empeo Inspector"
-	},
-	"content_scripts": [
-		{
-			"matches": [
-				"http://localhost/*",
-				"http://127.0.0.1/*",
-				"https://portal.dev.empeo.com/*",
-				"https://portal.uat.empeo.com/*"
-			],
-			"js": ["inject/chaos.js"],
-			"run_at": "document_start",
-			"world": "MAIN",
-			"all_frames": false
-		},
-		{
-			"matches": [
-				"http://localhost/*",
-				"http://127.0.0.1/*",
-				"https://portal.dev.empeo.com/*",
-				"https://portal.uat.empeo.com/*"
-			],
-			"js": ["content/bridge.js"],
-			"run_at": "document_start",
-			"world": "ISOLATED",
-			"all_frames": false
-		}
-	]
+		"default_title": "DS Colors"
+	}
 }

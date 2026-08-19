@@ -5,15 +5,10 @@ const watch = process.argv.includes("--watch");
 const outdir = "dist";
 
 await rm(outdir, { recursive: true, force: true });
-await mkdir(outdir, { recursive: true });
+await mkdir(`${outdir}/popup`, { recursive: true });
 
 const options = {
-	entryPoints: {
-		"inject/chaos": "src/inject/chaos.ts",
-		"content/bridge": "src/content/bridge.ts",
-		background: "src/background.ts",
-		"popup/popup": "src/popup/popup.ts",
-	},
+	entryPoints: { "popup/popup": "src/popup/popup.ts" },
 	outdir,
 	bundle: true,
 	format: "iife",
