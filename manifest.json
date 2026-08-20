@@ -1,10 +1,10 @@
 {
 	"manifest_version": 3,
-	"name": "Gofive DS Colors",
-	"version": "0.2.0",
-	"description": "Paste a hex or box-shadow, get the Gofive design system token to use.",
+	"name": "Gofive DS",
+	"version": "0.3.0",
+	"description": "Find the design system token for a colour or shadow, and check which icons have shipped to each environment.",
 	"action": {
 		"default_popup": "popup/index.html",
-		"default_title": "DS Colors"
+		"default_title": "Gofive DS"
 	}
 }

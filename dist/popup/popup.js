@@ -1,5 +1,81 @@
 "use strict";
 (() => {
+  // src/shared/icons.ts
+  var ICON_ENVS = [
+    { id: "dev", label: "dev", base: "https://apps-dev.gofive.co.th/" },
+    { id: "uat", label: "uat", base: "https://apps-uat.gofive.co.th/" },
+    { id: "prod", label: "prod", base: "https://app.gofive.co.th/modules/" }
+  ];
+  var CSS_PATH = "assets/icons/go5-icon/style.css";
+  var ICON_PREFIX = "gf-icon-";
+  function iconCssUrl(env) {
+    return env.base + CSS_PATH;
+  }
+  function parseIconCss(css) {
+    const found = /* @__PURE__ */ new Map();
+    const rule = /\.([a-zA-Z0-9_-]+):before\s*\{[^}]*?content:\s*["']\\?([0-9a-fA-F]{2,6})["']/g;
+    for (const match of css.matchAll(rule)) {
+      const cls = match[1];
+      if (found.has(cls)) continue;
+      found.set(cls, {
+        cls,
+        short: cls.replace(/^[a-z0-9]+-icon-/i, ""),
+        code: match[2].toLowerCase()
+      });
+    }
+    return [...found.values()];
+  }
+  function mergeByName(perEnv) {
+    const merged = /* @__PURE__ */ new Map();
+    for (const [envId, icons2] of Object.entries(perEnv)) {
+      for (const icon of icons2) {
+        const row = merged.get(icon.short) ?? { short: icon.short, codes: {}, envs: [] };
+        row.codes[envId] = icon.code;
+        if (!row.envs.includes(envId)) row.envs.push(envId);
+        merged.set(icon.short, row);
+      }
+    }
+    return [...merged.values()].sort((a, b) => a.short.localeCompare(b.short, "en"));
+  }
+  function classOf(icon) {
+    return ICON_PREFIX + icon.short;
+  }
+  function glyphOf(icon, fontEnv) {
+    const code = icon.codes[fontEnv] ?? Object.values(icon.codes)[0];
+    return code ? String.fromCodePoint(parseInt(code, 16)) : "";
+  }
+  function codeLabelOf(icon) {
+    const seen = [];
+    for (const env of ICON_ENVS) {
+      const code = icon.codes[env.id];
+      if (code && !seen.includes(code)) seen.push(code);
+    }
+    return seen.join(" / ");
+  }
+  function isPartial(icon) {
+    return icon.envs.length < ICON_ENVS.length;
+  }
+  function searchIcons(icons2, query) {
+    const q = query.trim().toLowerCase().replace(/^\.?(?:[a-z0-9]+-icon-)?/, "");
+    if (!q) return icons2;
+    const scored = [];
+    for (const icon of icons2) {
+      const name = icon.short.toLowerCase();
+      let rank;
+      if (name === q) rank = 0;
+      else if (name.startsWith(q)) rank = 1;
+      else if (name.includes(q)) rank = 2;
+      else if (Object.values(icon.codes).includes(q)) rank = 3;
+      else continue;
+      scored.push({ icon, rank });
+    }
+    return scored.sort((a, b) => a.rank - b.rank || a.icon.short.length - b.icon.short.length).map((s) => s.icon);
+  }
+  function newSince(names, known) {
+    const seen = new Set(known);
+    return names.filter((name) => !seen.has(name));
+  }
+
   // src/shared/tokens.generated.ts
   var TOKENS = {
     "themes": [
@@ -2076,6 +2152,20 @@
   var $fold = document.getElementById("fold");
   var $tokenBody = document.getElementById("tokenbody");
   var $toast = document.getElementById("toast");
+  var $lensColors = document.getElementById("lens-colors");
+  var $lensIcons = document.getElementById("lens-icons");
+  var $panelColors = document.getElementById("panel-colors");
+  var $panelIcons = document.getElementById("panel-icons");
+  var $iconGrid = document.getElementById("icongrid");
+  var $iconIdle = document.getElementById("iconidle");
+  var $iconLabel = document.getElementById("iconlbl");
+  var $envLine = document.getElementById("envline");
+  var $icAll = document.getElementById("ic-all");
+  var $icNew = document.getElementById("ic-new");
+  var $icPartial = document.getElementById("ic-partial");
+  var $viewCards = document.getElementById("view-cards");
+  var $viewGrid = document.getElementById("view-grid");
+  var $refresh = document.getElementById("refresh");
   var brands = brandsOf(TOKENS);
   var brand = brands.includes("empeo") ? "empeo" : brands[0];
   var mode = "light";
@@ -2134,10 +2224,13 @@
     if (!rows.length) return "";
     return `<details class="more"${open ? " open" : ""}><summary>${label}</summary><div class="rows">${rows.join("")}</div></details>`;
   }
+  function syncSearchChrome() {
+    $clear.hidden = !$q.value;
+    $chip.style.background = (lens === "colors" ? normalizeHex($q.value.trim()) : null) ?? "transparent";
+  }
   function renderAnswer() {
+    syncSearchChrome();
     const query = $q.value.trim();
-    $clear.hidden = !query;
-    $chip.style.background = normalizeHex(query) ?? "transparent";
     if (!query) {
       $ansBlock.hidden = true;
       $ansLabel.textContent = "Result";
@@ -2274,11 +2367,324 @@
     syncMode();
     renderList();
   });
-  $q.addEventListener("input", renderAnswer);
+  var ICON_CACHE_KEY = "ds-icons:snapshot:v1";
+  var ICON_VIEW_KEY = "ds-icons:view";
+  var ICON_BASELINE_KEY = "ds-icons:baseline:v1";
+  var icons = [];
+  var iconFilter = "all";
+  var iconView = readIconView();
+  var iconsLoaded = false;
+  var baseline = readBaseline();
+  var freshNames = /* @__PURE__ */ new Set();
+  function readBaseline() {
+    try {
+      const raw = localStorage.getItem(ICON_BASELINE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+  function writeBaseline(names) {
+    baseline = { at: Date.now(), names };
+    try {
+      localStorage.setItem(ICON_BASELINE_KEY, JSON.stringify(baseline));
+    } catch {
+    }
+  }
+  function diffAgainstBaseline() {
+    const names = icons.map((icon) => icon.short);
+    if (baseline) {
+      freshNames = new Set(newSince(names, baseline.names));
+    } else {
+      writeBaseline(names);
+      freshNames = /* @__PURE__ */ new Set();
+    }
+    $icNew.disabled = freshNames.size === 0;
+    if (!freshNames.size && iconFilter === "new") iconFilter = "all";
+  }
+  function isFresh(icon) {
+    return freshNames.has(icon.short);
+  }
+  function markAllSeen() {
+    writeBaseline(icons.map((icon) => icon.short));
+    freshNames = /* @__PURE__ */ new Set();
+    if (iconFilter === "new") setIconFilter("all");
+    else renderIconsPanel();
+  }
+  function readIconView() {
+    try {
+      return localStorage.getItem(ICON_VIEW_KEY) === "grid" ? "grid" : "cards";
+    } catch {
+      return "cards";
+    }
+  }
+  function readIconCache() {
+    try {
+      const raw = localStorage.getItem(ICON_CACHE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+  function writeIconCache(snapshot) {
+    try {
+      localStorage.setItem(ICON_CACHE_KEY, JSON.stringify(snapshot));
+    } catch {
+    }
+  }
+  async function fetchIconSets(hard = false) {
+    const perEnv = {};
+    const modified = {};
+    await Promise.all(
+      ICON_ENVS.map(async (env) => {
+        const res = await fetch(iconCssUrl(env), { cache: hard ? "reload" : "no-cache" });
+        if (!res.ok) throw new Error(`${env.id}: HTTP ${res.status}`);
+        perEnv[env.id] = parseIconCss(await res.text());
+        const lastModified = res.headers.get("last-modified");
+        if (lastModified) modified[env.id] = lastModified;
+      })
+    );
+    return { perEnv, modified };
+  }
+  function shortDate(value) {
+    if (!value) return "?";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "?";
+    return `${date.getDate()} ${MONTHS[date.getMonth()]}`;
+  }
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function clockOf(ms) {
+    const d = new Date(ms);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+  function partialFlag() {
+    const behind = icons.filter(isPartial);
+    if (!behind.length) return "";
+    const shapes = new Set(behind.map((icon) => [...icon.envs].sort().join("+")));
+    const title = shapes.size === 1 ? `${behind.length} icon(s) exist only on ${[...shapes][0].split("+").join(", ")}` : `${behind.length} icons are on some environments but not all`;
+    return ` <span class="warn" title="${escapeHtml(title)}">${behind.length} Mismatched</span>`;
+  }
+  function freshFlag() {
+    if (!freshNames.size) return "";
+    const since = baseline ? ` since ${shortDate(new Date(baseline.at).toUTCString())}` : "";
+    const title = `${freshNames.size} icon(s) added${since} \u2014 click to mark them all as seen`;
+    return ` <button type="button" class="newchip" id="seen" title="${escapeHtml(title)}">${freshNames.size} New \u2713</button>`;
+  }
+  var lastSnapshot = null;
+  function renderIconsPanel() {
+    renderEnvLine(lastSnapshot);
+    renderIcons();
+  }
+  function renderEnvLine(snapshot) {
+    lastSnapshot = snapshot;
+    if (!snapshot) {
+      $envLine.innerHTML = "";
+      return;
+    }
+    const counts = ICON_ENVS.map((env) => {
+      const count = snapshot.perEnv[env.id]?.length ?? 0;
+      const deployed = snapshot.modified?.[env.id];
+      const title = deployed ? `${env.label} \u2014 last shipped ${shortDate(deployed)} (${deployed})` : env.label;
+      return `<span title="${escapeHtml(title)}">${env.label} <b>${count}</b></span>`;
+    }).join(" \xB7 ");
+    const synced = `<span class="when sync">Synced ${clockOf(snapshot.fetchedAt)}</span>`;
+    $envLine.innerHTML = `<div class="envrow">${counts}${freshFlag()}${partialFlag()}${synced}</div>`;
+    document.getElementById("seen")?.addEventListener("click", markAllSeen);
+  }
+  function renderIcons() {
+    const pool = iconFilter === "partial" ? icons.filter(isPartial) : iconFilter === "new" ? icons.filter(isFresh) : icons;
+    const list = searchIcons(pool, $q.value);
+    $iconLabel.textContent = list.length === pool.length ? "Icons" : `Icons \xB7 ${list.length}`;
+    if (!icons.length) return;
+    if (!list.length) {
+      $iconGrid.innerHTML = "";
+      $iconIdle.hidden = false;
+      $iconIdle.textContent = "No result";
+      return;
+    }
+    $iconGrid.classList.toggle("dense", iconView === "grid");
+    $iconGrid.innerHTML = list.map(iconView === "grid" ? tileHtml : cardHtml).join("");
+    bindCopy($iconGrid);
+    $iconIdle.hidden = true;
+  }
+  function cardHtml(icon) {
+    const cls = classOf(icon);
+    const dots = ICON_ENVS.map((env) => {
+      const has = icon.envs.includes(env.id);
+      return `<span class="dot ${has ? "has" : "no"}" title="${env.label}${has ? "" : " \u2014 missing"}">${env.label}</span>`;
+    }).join("");
+    return `<button class="icard${marks(icon)}" type="button" data-use="${cls}"><span class="top"><span class="glyph">${glyphOf(icon, "uat")}</span><span class="nm" title="${cls}">${escapeHtml(icon.short)}</span>${isFresh(icon) ? '<span class="newtag">NEW</span>' : ""}</span><span class="foot"><span class="code">${codeLabelOf(icon)}</span><span class="dots">${dots}</span></span></button>`;
+  }
+  function marks(icon) {
+    return `${isPartial(icon) ? " partial" : ""}${isFresh(icon) ? " fresh" : ""}`;
+  }
+  function tileHtml(icon) {
+    const cls = classOf(icon);
+    const missing = ICON_ENVS.filter((env) => !icon.envs.includes(env.id)).map((env) => env.label);
+    const notes = [isFresh(icon) ? "new" : "", missing.length ? `missing on ${missing.join(", ")}` : ""].filter(Boolean);
+    const title = notes.length ? `${cls} \u2014 ${notes.join(", ")}` : cls;
+    return `<button class="itile${marks(icon)}" type="button" data-use="${cls}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"><span class="glyph">${glyphOf(icon, "uat")}</span></button>`;
+  }
+  async function loadIcons(hard = false) {
+    if (iconsLoaded && !hard) return;
+    iconsLoaded = true;
+    const cached = readIconCache();
+    if (cached && !hard) {
+      icons = mergeByName(cached.perEnv);
+      diffAgainstBaseline();
+      renderEnvLine(cached);
+      renderIcons();
+      $iconIdle.hidden = true;
+    }
+    $refresh.classList.add("is-busy");
+    try {
+      const { perEnv, modified } = await fetchIconSets(hard);
+      const snapshot = { fetchedAt: Date.now(), perEnv, modified };
+      writeIconCache(snapshot);
+      icons = mergeByName(perEnv);
+      diffAgainstBaseline();
+      renderEnvLine(snapshot);
+      renderIcons();
+      $iconIdle.hidden = true;
+      if (hard) toast(freshNames.size ? `Synced \xB7 ${freshNames.size} new` : `Synced \xB7 ${icons.length} icons`);
+    } catch (error) {
+      iconsLoaded = false;
+      if (!cached) {
+        $iconIdle.hidden = false;
+        $iconIdle.textContent = "Could not load the icon set from the CDN";
+      } else {
+        toast("Showing cached data \u2014 sync failed");
+      }
+      console.error(error);
+    } finally {
+      $refresh.classList.remove("is-busy");
+    }
+  }
+  var LENS_KEY = "ds-colors:lens";
+  var lens = "colors";
+  var queries = { colors: "", icons: "" };
+  function applyLens(next) {
+    if (next !== lens) queries[lens] = $q.value;
+    lens = next;
+    const isIcons = next === "icons";
+    $q.value = queries[next];
+    $lensColors.setAttribute("aria-selected", String(!isIcons));
+    $lensIcons.setAttribute("aria-selected", String(isIcons));
+    $panelColors.hidden = isIcons;
+    $panelIcons.hidden = !isIcons;
+    $brand.hidden = isIcons;
+    $pick.hidden = isIcons || !window.EyeDropper;
+    $q.placeholder = isIcons ? "Search icons by name or codepoint" : "Paste hex, box-shadow or token name";
+    localStorage.setItem(LENS_KEY, next);
+    if (isIcons) void loadIcons();
+    renderCurrent();
+  }
+  function renderCurrent() {
+    if (lens === "icons") {
+      syncSearchChrome();
+      scheduleIconRender();
+    } else {
+      renderAnswer();
+    }
+  }
+  var iconRenderTimer;
+  function scheduleIconRender() {
+    if (iconRenderTimer !== void 0) clearTimeout(iconRenderTimer);
+    iconRenderTimer = setTimeout(() => {
+      iconRenderTimer = void 0;
+      renderIcons();
+    }, 70);
+  }
+  $lensColors.addEventListener("click", () => applyLens("colors"));
+  $lensIcons.addEventListener("click", () => applyLens("icons"));
+  function setIconFilter(next) {
+    iconFilter = next;
+    $icAll.setAttribute("aria-pressed", String(next === "all"));
+    $icNew.setAttribute("aria-pressed", String(next === "new"));
+    $icPartial.setAttribute("aria-pressed", String(next === "partial"));
+    $icNew.disabled = freshNames.size === 0;
+    renderIconsPanel();
+  }
+  for (const [id, value] of [
+    ["ic-all", "all"],
+    ["ic-new", "new"],
+    ["ic-partial", "partial"]
+  ]) {
+    document.getElementById(id)?.addEventListener("click", () => setIconFilter(value));
+  }
+  for (const [id, value] of [
+    ["view-cards", "cards"],
+    ["view-grid", "grid"]
+  ]) {
+    document.getElementById(id)?.addEventListener("click", () => {
+      iconView = value;
+      try {
+        localStorage.setItem(ICON_VIEW_KEY, value);
+      } catch {
+      }
+      applyIconView();
+      renderIcons();
+    });
+  }
+  function applyIconView() {
+    $viewCards.setAttribute("aria-pressed", String(iconView === "cards"));
+    $viewGrid.setAttribute("aria-pressed", String(iconView === "grid"));
+  }
+  applyIconView();
+  $refresh.addEventListener("click", () => {
+    void loadIcons(true);
+  });
+  $q.addEventListener("input", renderCurrent);
   $clear.addEventListener("click", () => {
     $q.value = "";
     $q.focus();
-    renderAnswer();
+    renderCurrent();
+  });
+  function iconCells() {
+    return [...$iconGrid.querySelectorAll("[data-use]")];
+  }
+  function columnCount() {
+    const columns = getComputedStyle($iconGrid).gridTemplateColumns;
+    return Math.max(1, columns.split(" ").filter(Boolean).length);
+  }
+  function focusCell(index) {
+    const cells = iconCells();
+    if (!cells.length) return;
+    const target = cells[Math.max(0, Math.min(index, cells.length - 1))];
+    target.focus();
+    target.scrollIntoView({ block: "nearest" });
+  }
+  $q.addEventListener("keydown", (event) => {
+    if (lens !== "icons" || event.key !== "ArrowDown") return;
+    event.preventDefault();
+    focusCell(0);
+  });
+  $iconGrid.addEventListener("keydown", (event) => {
+    const cells = iconCells();
+    const here = cells.indexOf(document.activeElement);
+    if (here < 0) return;
+    const step = columnCount();
+    const moves = {
+      ArrowRight: here + 1,
+      ArrowLeft: here - 1,
+      ArrowDown: here + step,
+      ArrowUp: here - step,
+      Home: 0,
+      End: cells.length - 1
+    };
+    if (event.key === "ArrowUp" && here < step) {
+      event.preventDefault();
+      $q.focus();
+      return;
+    }
+    if (event.key in moves) {
+      event.preventDefault();
+      focusCell(moves[event.key]);
+      return;
+    }
+    if (event.key === "Escape" || event.key.length === 1 && !event.metaKey && !event.ctrlKey) {
+      $q.focus();
+    }
   });
   function setUpEyeDropper() {
     const Dropper = window.EyeDropper;
@@ -2316,6 +2722,7 @@
   }
   setUpEyeDropper();
   setUpFold();
+  applyLens(localStorage.getItem(LENS_KEY) ?? "colors");
   syncMode();
   applyAccent();
   renderList();

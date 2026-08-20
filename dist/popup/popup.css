@@ -635,6 +635,13 @@ details.more > div {
 	color: #fff;
 }
 
+/* icon-only variant — the glyph carries the meaning, so the text padding goes */
+.viewsw button {
+	display: grid;
+	place-items: center;
+	padding: 4px 6px;
+}
+
 .modesw button:disabled {
 	opacity: 0.4;
 	cursor: not-allowed;
@@ -685,4 +692,350 @@ details.more > div {
 	.toast {
 		transition: none;
 	}
+}
+/* ================= lens switcher ================= */
+
+.lenses {
+	display: flex;
+	border-bottom: 1px solid var(--line);
+	background: var(--line-2);
+}
+
+.lenses button {
+	flex: 1;
+	font-family: var(--mono);
+	font-size: 11.5px;
+	background: transparent;
+	border: none;
+	border-bottom: 2px solid transparent;
+	color: var(--ink-3);
+	padding: 7px 4px;
+	cursor: pointer;
+}
+
+.lenses button[aria-selected="true"] {
+	color: var(--ink);
+	border-bottom-color: var(--accent);
+	background: var(--bg);
+}
+
+.lenses button:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: -2px;
+}
+
+/* ================= icons lens ================= */
+
+/* The icon font is fetched straight from the asset CDN: it answers
+   access-control-allow-origin: * and MV3's default CSP leaves font-src open,
+   so this needs no host permission and no bundled copy. */
+@font-face {
+	font-family: "gofive";
+	src: url("https://apps-uat.gofive.co.th/assets/icons/go5-icon/fonts/gofive.woff") format("woff");
+	font-weight: normal;
+	font-style: normal;
+	font-display: block;
+}
+
+.envline {
+	font-family: var(--mono);
+	font-size: 10px;
+	color: var(--ink-3);
+}
+
+.envrow {
+	display: flex;
+	gap: 5px;
+	flex-wrap: wrap;
+	align-items: center;
+}
+
+/* pushed right so the counts read as one group and the timestamp as an aside */
+.envrow .sync {
+	margin-left: auto;
+}
+
+.envline b {
+	font-weight: 500;
+	color: var(--ink-2);
+	font-variant-numeric: tabular-nums;
+}
+
+.envline .warn {
+	color: var(--warn);
+	background: var(--warn-bg);
+	border-radius: 4px;
+	padding: 1px 5px;
+}
+
+.icongrid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(205px, 1fr));
+	gap: 5px;
+}
+
+/* Sweep view: square tiles, glyph only. Named .dense because that is the point —
+   ~10x the icons on screen, at the cost of every label. */
+.icongrid.dense {
+	grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+	gap: 4px;
+}
+
+.itile {
+	aspect-ratio: 1;
+	display: grid;
+	place-items: center;
+	padding: 0;
+	background: transparent;
+	border: 1px solid var(--line);
+	border-radius: 7px;
+	cursor: pointer;
+}
+
+.itile:hover {
+	border-color: var(--accent);
+	background: var(--line-2);
+}
+
+.itile:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+.itile .glyph {
+	font-size: 19px;
+	width: auto;
+}
+
+/* Same signal as the card view: outlined means it is not on every environment. */
+.itile.partial {
+	border-color: var(--warn);
+	box-shadow: 0 0 0 1px var(--warn);
+}
+
+/* New and mismatched are usually true at once, and the outline can only say one
+   thing. It keeps saying "missing somewhere", which is the actionable half; new
+   gets a corner dot so both survive without competing. */
+.itile.fresh:not(.partial),
+.icard.fresh:not(.partial) {
+	border-color: var(--ok);
+}
+
+.itile.fresh {
+	position: relative;
+}
+
+.itile.fresh::after {
+	content: "";
+	position: absolute;
+	top: 3px;
+	right: 3px;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: var(--ok);
+}
+
+.newtag {
+	flex: none;
+	margin-left: auto;
+	font-family: var(--mono);
+	font-size: 8px;
+	letter-spacing: 0.04em;
+	line-height: 13px;
+	padding: 0 4px;
+	border-radius: 3px;
+	color: var(--ok);
+	background: var(--ok-bg);
+}
+
+/* A button, not a badge: the count is only useful next to a way to clear it. */
+.newchip {
+	font: inherit;
+	font-size: 10px;
+	padding: 1px 5px;
+	border: none;
+	border-radius: 4px;
+	color: var(--ok);
+	background: var(--ok-bg);
+	cursor: pointer;
+}
+
+.newchip:hover {
+	filter: brightness(0.96);
+}
+
+.newchip:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+.icard {
+	background: transparent;
+	border: 1px solid var(--line);
+	border-radius: 7px;
+	overflow: hidden;
+	cursor: pointer;
+	text-align: left;
+	width: 100%;
+	padding: 0;
+	font-family: inherit;
+	color: inherit;
+	display: flex;
+	flex-direction: column;
+}
+
+.icard:hover {
+	border-color: var(--accent);
+}
+
+.icard:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+.icard.partial {
+	border-color: var(--warn);
+	box-shadow: 0 0 0 1px var(--warn);
+}
+
+.icard .top {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding: 6px 7px 5px;
+	min-width: 0;
+}
+
+.glyph {
+	font-family: "gofive";
+	font-size: 17px;
+	line-height: 1;
+	flex: none;
+	width: 20px;
+	text-align: center;
+	color: var(--ink);
+}
+
+.icard .nm {
+	font-family: var(--mono);
+	font-size: 11px;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.icard .foot {
+	border-top: 1px solid var(--line-2);
+	background: var(--line-2);
+	padding: 3px 7px 4px;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.icard .code {
+	font-family: var(--mono);
+	font-size: 9.5px;
+	color: var(--ink-3);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.dots {
+	display: inline-flex;
+	gap: 3px;
+	margin-left: auto;
+	flex: none;
+}
+
+/* min-width keeps the three badges aligned; the padding is what stops the longest
+   label clearing its box — "prod" at 8px mono is almost exactly 19px wide, so a
+   fixed 19px box left it touching both edges. */
+.dot {
+	min-width: 27px;
+	padding: 0 3px;
+	height: 13px;
+	border-radius: 3px;
+	font-family: var(--mono);
+	font-size: 8.5px;
+	line-height: 13px;
+	text-align: center;
+}
+
+.dot.has {
+	background: var(--ok-bg);
+	color: var(--ok);
+}
+
+.dot.no {
+	background: var(--danger-bg);
+	color: var(--danger);
+}
+
+.headtools {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	flex: none;
+}
+
+/* Labelled sibling of .fold — same hit area height, but it says what it does,
+   because a lone arrow-circle reads as "reload the page" to everyone. */
+.syncbtn {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: 22px;
+	flex: none;
+	padding: 0 7px;
+	border: 1px solid var(--line);
+	border-radius: 5px;
+	background: transparent;
+	color: var(--ink-2);
+	font: inherit;
+	font-size: 10.5px;
+	cursor: pointer;
+}
+
+.syncbtn:hover {
+	color: var(--ink);
+	background: var(--line-2);
+}
+
+.syncbtn:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+.fold.is-busy,
+.syncbtn.is-busy {
+	color: var(--accent);
+	border-color: var(--accent);
+}
+
+.fold.is-busy svg,
+.syncbtn.is-busy svg {
+	animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.fold.is-busy svg,
+	.syncbtn.is-busy svg {
+		animation: none;
+	}
+}
+
+.envline .when {
+	color: var(--ink-3);
+	opacity: 0.8;
 }

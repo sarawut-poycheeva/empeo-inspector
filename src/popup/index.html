@@ -7,10 +7,15 @@
 	<body>
 		<header class="bar">
 			<span class="logo" aria-hidden="true"></span>
-			<strong>DS Colors</strong>
+			<strong>Gofive DS</strong>
 			<span class="spacer"></span>
 			<select id="brand" aria-label="Brand"></select>
 		</header>
+
+		<div class="lenses" role="tablist" aria-label="Lens">
+			<button type="button" role="tab" id="lens-colors" aria-selected="true">Colors</button>
+			<button type="button" role="tab" id="lens-icons" aria-selected="false">Icons</button>
+		</div>
 
 		<div class="search">
 			<label class="sbox">
@@ -39,39 +44,88 @@
 		</div>
 
 		<main>
-			<section class="blk" id="ansblk" hidden>
-				<h2 class="lbl" id="anslbl">Result</h2>
-				<div id="ans"></div>
-			</section>
+			<!-- ===== Colors lens ===== -->
+			<div id="panel-colors">
+				<section class="blk" id="ansblk" hidden>
+					<h2 class="lbl" id="anslbl">Result</h2>
+					<div id="ans"></div>
+				</section>
 
-			<section class="blk">
-				<div class="blk-head">
-					<h2 class="lbl">Tokens</h2>
-					<button class="fold" id="fold" type="button" aria-expanded="true" aria-controls="tokenbody" title="Hide tokens">
-						<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-							<path
-								d="M4 6.5 8 10.5l4-4"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="1.6"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							/>
-						</svg>
-					</button>
-				</div>
+				<section class="blk">
+					<div class="blk-head">
+						<h2 class="lbl">Tokens</h2>
+						<button class="fold" id="fold" type="button" aria-expanded="true" aria-controls="tokenbody" title="Hide tokens">
+							<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+								<path d="M4 6.5 8 10.5l4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+							</svg>
+						</button>
+					</div>
 
-				<div id="tokenbody">
-					<div class="ctrls">
-						<select id="group" aria-label="Token group"></select>
-						<div class="modesw" role="group" aria-label="Color mode">
-							<button type="button" id="mode-light" aria-pressed="true">Light</button>
-							<button type="button" id="mode-dark" aria-pressed="false">Dark</button>
+					<div id="tokenbody">
+						<div class="ctrls">
+							<select id="group" aria-label="Token group"></select>
+							<div class="modesw" role="group" aria-label="Color mode">
+								<button type="button" id="mode-light" aria-pressed="true">Light</button>
+								<button type="button" id="mode-dark" aria-pressed="false">Dark</button>
+							</div>
+						</div>
+						<div class="rows" id="list"></div>
+					</div>
+				</section>
+			</div>
+
+			<!-- ===== Icons lens ===== -->
+			<div id="panel-icons" hidden>
+				<section class="blk">
+					<div class="blk-head">
+						<h2 class="lbl" id="iconlbl">Icons</h2>
+						<div class="headtools">
+							<div class="modesw" role="group" aria-label="Filter">
+								<button type="button" id="ic-all" aria-pressed="true">All</button>
+								<button type="button" id="ic-new" aria-pressed="false" disabled title="Icons added since you last marked the set as seen">
+									New
+								</button>
+								<button type="button" id="ic-partial" aria-pressed="false" title="Only icons that are missing from at least one environment">
+									Mismatched
+								</button>
+							</div>
+							<div class="modesw viewsw" role="group" aria-label="View">
+								<button type="button" id="view-cards" aria-pressed="true" title="Cards — name, codepoint and environments">
+									<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+										<path d="M2 4h12M2 8h12M2 12h12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+									</svg>
+								</button>
+								<button type="button" id="view-grid" aria-pressed="false" title="Grid — glyphs only, for scanning the set">
+									<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+										<path
+											d="M2.5 2.5h4v4h-4zM9.5 2.5h4v4h-4zM2.5 9.5h4v4h-4zM9.5 9.5h4v4h-4z"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="1.4"
+										/>
+									</svg>
+								</button>
+							</div>
+							<button class="syncbtn" id="refresh" type="button" title="Fetch every environment again, bypassing the cache">
+								Sync
+								<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+									<path
+										d="M13.2 8a5.2 5.2 0 1 1-1.6-3.7M13.4 2.2v3h-3"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="1.5"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									/>
+								</svg>
+							</button>
 						</div>
 					</div>
-					<div class="rows" id="list"></div>
-				</div>
-			</section>
+					<div id="envline" class="envline"></div>
+					<div class="icongrid" id="icongrid"></div>
+					<div class="idle" id="iconidle">Loading…</div>
+				</section>
+			</div>
 		</main>
 
 		<div class="toast" id="toast" role="status" aria-live="polite"></div>
