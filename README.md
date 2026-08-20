@@ -1,4 +1,4 @@
-# Gofive DS
+# Dev Inspectors
 
 Chrome extension with two lenses over the Gofive design system.
 
