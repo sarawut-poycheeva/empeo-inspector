@@ -1,6 +1,6 @@
 # Dev Inspectors
 
-Chrome extension with two lenses over the Gofive design system.
+Chrome extension with three lenses for front-end work on the Gofive platform.
 
 **Colors** — paste a hex or a `box-shadow`, get the token you should be using, plus the light
 and dark value and whether a utility class exists or only a CSS variable.
@@ -8,8 +8,12 @@ and dark value and whether a utility class exists or only a CSS variable.
 **Icons** — search 1,200+ icons by name and see the real glyph, with a per-environment badge
 showing whether each one has shipped to dev, uat and prod yet.
 
-Both answer questions that cost real time: *which `go5-` class is this colour from a design
-file*, and *has the icon someone added actually been deployed*.
+**Redirect** — point a deployed Module Federation bundle at your local build, several at once,
+each with its own port and toggle.
+
+All three answer questions that cost real time: *which `go5-` class is this colour from a design
+file*, *has the icon someone added actually been deployed*, and *does my change work against real
+UAT data before I deploy it*.
 
 ## Install (unpacked)
 
@@ -207,6 +211,75 @@ Worth raising with the DS team.
 **`custom-light` declares no shadow tokens at all**, so `var(--go5-shadow-soft)` resolves to
 nothing for tenants on that theme.
 
+## Redirect lens
+
+Ported from the `empeo-requestly` extension, which replaced doing this one rule at a time in
+Requestly itself. Type `empeo-learn/main.js`, or paste the whole URL out of the Network panel,
+and every request whose URL contains that substring is served from `http://localhost:<port>`
+instead.
+
+| | |
+|---|---|
+| Match | substring, host-agnostic — one entry covers dev, uat and prod |
+| Rewrite | scheme, host and port only; the path is preserved by DNR `transform` |
+| Port | per entry, so two modules can be served from two dev servers at once |
+| Toggle | per entry, plus one master switch that empties the rule set without losing the list |
+| Toolbar badge | how many redirects are armed |
+
+### What changed from the original
+
+**Per-entry port.** One fixed port is fine until you need two modules at the same time, and
+you cannot serve two `dist/` folders from one `lite-server`. The port is inline on the row.
+
+**A pasted URL is accepted.** What people have to hand is the URL from DevTools, not the
+substring. The origin, the leading slash and the `?v=…` cache buster are all stripped — leaving
+the cache buster in would pin the rule to one build and look like the redirect simply failed.
+
+**A badge on the toolbar icon.** The expensive mistake with this tool is forgetting a redirect
+is on: the page quietly serves a stale local build and the next hour goes into debugging a
+ghost. The count is visible without opening anything.
+
+**A reachability dot per row.** The second expensive mistake is a redirect pointing at a server
+that was never started. The dot says whether the port answered — and only that: a `no-cors`
+request cannot read a status, so a 404 and a 200 are indistinguishable. Port open is still the
+failure worth catching.
+
+**Scan page.** Typing the path is where this lens goes wrong: one wrong character matches
+nothing, silently. `Scan page` reads `performance.getEntriesByType("resource")` out of the tab you
+opened the popup on and lists the Module Federation entry points it actually fetched — `main.js`,
+`remoteEntry.js`, `polyfills.js` — each with an `+ Add`. Hashed webpack chunks are dropped: they
+are worthless as a rule, since the name changes every build.
+
+A bare `main.js` at the root is never offered, even though pages do load such files. It would
+match every module on every host and send them all to one port, breaking the page in a way that
+looks nothing like a redirect problem.
+
+This is the one place the extension reads from a page, and it needs `scripting` + `activeTab`.
+`activeTab` is granted by the click that opened the popup, covers only that tab, and lapses when
+it navigates — so there is still no standing access to page content, and no content script.
+
+**`on this page`.** Armed and *actually fired here* are different questions, and only the second
+one answers "is this module really coming from my machine". Chrome keeps a per-tab log of matched
+rules, read with `getMatchedRules`; the rule ids in it are the entry ids, since `buildDnrRule`
+uses one as the other. Only the tab id is used, so this needs no `tabs` permission — that one
+gates the url and title, which are none of this lens's business.
+
+Two things it cannot tell you. The log only holds requests that already happened, so arming a
+rule while the page is open shows nothing until a reload — correct, but easy to read as broken.
+And it is cleared when the tab navigates, so an empty list means "not since this page loaded",
+never "your rule is wrong".
+
+### Why the rules live in the service worker
+
+The popup only writes `chrome.storage.local`; `background.js` watches storage and rebuilds the
+entire dynamic rule set in one atomic `updateDynamicRules` call. Two consequences: the live rules
+cannot drift from the list you are looking at, and a popup closed mid-edit cannot leave a stale
+redirect running.
+
+`chrome.storage.local` rather than `localStorage`, because a service worker cannot read a page's
+`localStorage` — the other two lenses keep using `localStorage` for their own view preferences,
+which the worker has no business knowing.
+
 ## Layout
 
 ```
@@ -214,8 +287,10 @@ scripts/extract-tokens.mjs     generator — reads the DS repo
 src/shared/tokens.ts           colour + shadow matching
 src/shared/tokens.generated.ts generated colour data (do not edit)
 src/shared/icons.ts            icon stylesheet parsing and cross-env merging
+src/shared/redirect.ts         path normalising and DNR rule building
+src/background.ts              service worker: storage → redirect rules
 src/popup/                     the popup: index.html, popup.css, popup.ts
-test/                          28 tests over both lenses
+test/                          46 tests over all three lenses
 dist/                          built output, committed for distribution
 ```
 
@@ -227,14 +302,29 @@ npm run watch     # rebuild on save
 
 ## Permissions
 
-None. No `permissions`, no `host_permissions`, no content script, no background worker.
+The colours and icons lenses need none at all. The redirect lens changes that, and the cost is
+worth stating plainly rather than burying in the manifest:
 
-Colour data is bundled into the popup. Icon data is fetched from the asset CDN, which is
-possible without a host permission only because that CDN sends
-`access-control-allow-origin: *` — worth knowing, because if that ever changes the icons lens
-needs a host permission and the extension stops being permission-free.
+| | Why |
+|---|---|
+| `declarativeNetRequest` | the redirect itself |
+| `declarativeNetRequestFeedback` | reading Chrome's log of which rules matched, for `on this page` |
+| `scripting` + `activeTab` | `Scan page` — reading the resource list out of the tab you opened the popup on, and nothing else |
+| `storage` | the popup and the service worker have to share one rule list |
+| `host_permissions: <all_urls>` | a DNR redirect action needs host access **for the request being redirected**, and the whole point is that one entry covers dev, uat and prod |
 
-Nothing is read from or written to any page.
+`<all_urls>` is the expensive one. Chrome will describe this extension as able to read and change
+your data on all sites, and that description is fair: DNR is declarative and this build never
+reads a response body, but the permission granted is broad regardless. Before, the answer to
+"what can it see" was "nothing"; now it is "it could see everything, and does not".
+
+If that trade is not worth it, remove `background.js`, those three manifest keys and the Redirect
+tab — the other two lenses go back to needing zero permissions.
+
+Colour data is bundled into the popup. Icon data is fetched from the asset CDN, possible without
+a host permission of its own because that CDN sends `access-control-allow-origin: *`.
+
+The only page access is `Scan page`, which reads the resource-timing list from the tab you opened the popup on. There is still no content script and nothing is ever written to a page.
 
 ## Not in this version
 

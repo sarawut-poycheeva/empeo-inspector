@@ -15,6 +15,7 @@
 		<div class="lenses" role="tablist" aria-label="Lens">
 			<button type="button" role="tab" id="lens-colors" aria-selected="true">Colors</button>
 			<button type="button" role="tab" id="lens-icons" aria-selected="false">Icons</button>
+			<button type="button" role="tab" id="lens-redirect" aria-selected="false">Redirect</button>
 		</div>
 
 		<div class="search">
@@ -124,6 +125,64 @@
 					<div id="envline" class="envline"></div>
 					<div class="icongrid" id="icongrid"></div>
 					<div class="idle" id="iconidle">Loading…</div>
+				</section>
+			</div>
+
+			<!-- ===== Redirect lens ===== -->
+			<div id="panel-redirect" hidden>
+				<section class="blk">
+					<div class="blk-head">
+						<h2 class="lbl" id="redirlbl">Redirect</h2>
+						<div class="headtools">
+							<span class="armed" id="armed"></span>
+							<button class="syncbtn" id="scan" type="button" title="List the Module Federation bundles this page loaded" data-testid="button-redirect-scan">
+								Scan page
+								<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+									<circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" stroke-width="1.5" />
+									<path d="M10.2 10.2 13.5 13.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+								</svg>
+							</button>
+							<label class="tgl" title="Turn every redirect off without losing the list">
+								<input type="checkbox" id="global" data-testid="checkbox-redirect-global" />
+								<span class="track"></span>
+							</label>
+						</div>
+					</div>
+
+					<div class="notice" id="rnotice" hidden></div>
+
+					<div class="found" id="found" hidden>
+						<div class="found-head">
+							<span id="foundlbl"></span>
+							<button type="button" id="foundclose" title="Close" data-testid="button-redirect-found-close">✕</button>
+						</div>
+						<ul id="foundlist"></ul>
+					</div>
+
+					<ul class="rules" id="rules"></ul>
+					<div class="idle" id="ruleidle">No redirect yet</div>
+
+					<form class="addrule" id="addrule">
+						<input
+							id="rpath"
+							type="text"
+							placeholder="empeo-learn/main.js — or paste the URL"
+							autocomplete="off"
+							spellcheck="false"
+							aria-label="Module path"
+							data-testid="textbox-redirect-path"
+						/>
+						<input
+							id="rport"
+							type="text"
+							inputmode="numeric"
+							value="3000"
+							aria-label="Port"
+							data-testid="textbox-redirect-port"
+						/>
+						<button type="submit" id="radd" data-testid="button-redirect-add">Add</button>
+						<button type="button" id="rcancel" title="Cancel editing (Esc)" data-testid="button-redirect-cancel" hidden>✕</button>
+					</form>
 				</section>
 			</div>
 		</main>

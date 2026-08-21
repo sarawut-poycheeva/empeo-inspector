@@ -76,6 +76,76 @@
     return names.filter((name) => !seen.has(name));
   }
 
+  // src/shared/redirect.ts
+  function deriveName(path) {
+    const segments = path.split("/").filter(Boolean);
+    if (!segments.length) return path;
+    if (segments.length === 1) return segments[0].replace(/\.[a-z0-9]+$/i, "");
+    return segments[0];
+  }
+  function labelOf(entry) {
+    return entry.label?.trim() || deriveName(entry.path);
+  }
+  var DEFAULT_PORT = 3e3;
+  var REDIRECT_STORAGE_KEYS = { globalEnabled: true, entries: [] };
+  function normalizePath(input) {
+    let value = input.trim();
+    if (!value) return null;
+    const scheme = /^[a-z][a-z0-9+.-]*:\/\//i;
+    if (scheme.test(value)) {
+      value = value.replace(scheme, "").replace(/^[^/]*\/?/, "");
+    } else if (/^(?:[^/]*\.[^/]*|localhost)(?::\d+)?\//.test(value)) {
+      value = value.replace(/^[^/]*\//, "");
+    }
+    value = value.split(/[?#]/)[0];
+    value = value.replace(/^\/+/, "");
+    return value || null;
+  }
+  function nextId(entries) {
+    return entries.reduce((max, entry) => Math.max(max, entry.id), 0) + 1;
+  }
+  function parsePort(input) {
+    if (!/^\d{1,5}$/.test(input.trim())) return null;
+    const port = Number(input.trim());
+    return port >= 1 && port <= 65535 ? port : null;
+  }
+  function addEntry(entries, path, port) {
+    const existing = entries.find((entry) => entry.path === path);
+    if (existing) return entries.map((entry) => entry === existing ? { ...entry, port, enabled: true } : entry);
+    return [...entries, { id: nextId(entries), path, port, enabled: true }];
+  }
+  var RESOURCE_TYPES = ["script", "stylesheet", "sub_frame", "xmlhttprequest"];
+  function buildDnrRule(entry) {
+    return {
+      id: entry.id,
+      priority: 1,
+      action: {
+        type: "redirect",
+        redirect: { transform: { scheme: "http", host: "localhost", port: String(entry.port) } }
+      },
+      condition: { urlFilter: entry.path, resourceTypes: RESOURCE_TYPES }
+    };
+  }
+  function rulesFor(state) {
+    if (!state.globalEnabled) return [];
+    return state.entries.filter((entry) => entry.enabled && entry.path).map(buildDnrRule);
+  }
+  function activeCount(state) {
+    return rulesFor(state).length;
+  }
+  function targetUrl(entry) {
+    return `http://localhost:${entry.port}/${entry.path}`;
+  }
+  var ENTRY_POINT = /\/(main|remoteEntry|polyfills)\.js$/;
+  function moduleCandidates(urls) {
+    const paths = /* @__PURE__ */ new Set();
+    for (const url of urls) {
+      const path = normalizePath(url);
+      if (path?.includes("/") && ENTRY_POINT.test(`/${path}`)) paths.add(path);
+    }
+    return [...paths].sort((a, b) => a.localeCompare(b));
+  }
+
   // src/shared/tokens.generated.ts
   var TOKENS = {
     "themes": [
@@ -2166,6 +2236,24 @@
   var $viewCards = document.getElementById("view-cards");
   var $viewGrid = document.getElementById("view-grid");
   var $refresh = document.getElementById("refresh");
+  var $search = document.querySelector(".search");
+  var $lensRedirect = document.getElementById("lens-redirect");
+  var $panelRedirect = document.getElementById("panel-redirect");
+  var $rules = document.getElementById("rules");
+  var $ruleIdle = document.getElementById("ruleidle");
+  var $notice = document.getElementById("rnotice");
+  var $global = document.getElementById("global");
+  var $armed = document.getElementById("armed");
+  var $addRule = document.getElementById("addrule");
+  var $rPath = document.getElementById("rpath");
+  var $rPort = document.getElementById("rport");
+  var $rAdd = document.getElementById("radd");
+  var $rCancel = document.getElementById("rcancel");
+  var $scan = document.getElementById("scan");
+  var $found = document.getElementById("found");
+  var $foundLabel = document.getElementById("foundlbl");
+  var $foundList = document.getElementById("foundlist");
+  var $foundClose = document.getElementById("foundclose");
   var brands = brandsOf(TOKENS);
   var brand = brands.includes("empeo") ? "empeo" : brands[0];
   var mode = "light";
@@ -2562,28 +2650,33 @@
   }
   var LENS_KEY = "ds-colors:lens";
   var lens = "colors";
-  var queries = { colors: "", icons: "" };
+  var queries = { colors: "", icons: "", redirect: "" };
   function applyLens(next) {
     if (next !== lens) queries[lens] = $q.value;
     lens = next;
-    const isIcons = next === "icons";
     $q.value = queries[next];
-    $lensColors.setAttribute("aria-selected", String(!isIcons));
-    $lensIcons.setAttribute("aria-selected", String(isIcons));
-    $panelColors.hidden = isIcons;
-    $panelIcons.hidden = !isIcons;
-    $brand.hidden = isIcons;
-    $pick.hidden = isIcons || !window.EyeDropper;
-    $q.placeholder = isIcons ? "Search icons by name or codepoint" : "Paste hex, box-shadow or token name";
+    for (const [tab, panel, name] of [
+      [$lensColors, $panelColors, "colors"],
+      [$lensIcons, $panelIcons, "icons"],
+      [$lensRedirect, $panelRedirect, "redirect"]
+    ]) {
+      tab.setAttribute("aria-selected", String(next === name));
+      panel.hidden = next !== name;
+    }
+    $brand.hidden = next !== "colors";
+    $pick.hidden = next !== "colors" || !window.EyeDropper;
+    $search.hidden = next === "redirect";
+    $q.placeholder = next === "icons" ? "Search icons by name or codepoint" : "Paste hex, box-shadow or token name";
     localStorage.setItem(LENS_KEY, next);
-    if (isIcons) void loadIcons();
+    if (next === "icons") void loadIcons();
+    if (next === "redirect") void loadRules();
     renderCurrent();
   }
   function renderCurrent() {
     if (lens === "icons") {
       syncSearchChrome();
       scheduleIconRender();
-    } else {
+    } else if (lens === "colors") {
       renderAnswer();
     }
   }
@@ -2595,8 +2688,13 @@
       renderIcons();
     }, 70);
   }
-  $lensColors.addEventListener("click", () => applyLens("colors"));
-  $lensIcons.addEventListener("click", () => applyLens("icons"));
+  for (const [tab, name] of [
+    [$lensColors, "colors"],
+    [$lensIcons, "icons"],
+    [$lensRedirect, "redirect"]
+  ]) {
+    tab.addEventListener("click", () => applyLens(name));
+  }
   function setIconFilter(next) {
     iconFilter = next;
     $icAll.setAttribute("aria-pressed", String(next === "all"));
@@ -2720,6 +2818,302 @@
       applyFold(folded);
     });
   }
+  var rules = [];
+  var globalEnabled = true;
+  function setNotice(text, mild = false) {
+    $notice.textContent = text;
+    $notice.hidden = !text;
+    $notice.classList.toggle("mild", mild);
+  }
+  async function readRedirectState() {
+    const stored = await chrome.storage.local.get(REDIRECT_STORAGE_KEYS);
+    return { globalEnabled: stored.globalEnabled !== false, entries: stored.entries ?? [] };
+  }
+  function saveRules(next) {
+    rules = next;
+    void chrome.storage.local.set({ entries: next });
+    renderRules();
+  }
+  async function loadRules() {
+    const state = await readRedirectState();
+    rules = state.entries;
+    globalEnabled = state.globalEnabled;
+    $global.checked = globalEnabled;
+    setNotice(
+      chrome.declarativeNetRequest ? "" : "Chrome is running this with an older permission set, so nothing is being redirected. Remove the extension and Load unpacked again \u2014 Reload does not grant new permissions."
+    );
+    renderRules();
+    void probePorts();
+    void readMatched();
+  }
+  function paintHeader() {
+    const live = activeCount({ globalEnabled, entries: rules });
+    const paused = !globalEnabled && rules.length > 0;
+    $armed.textContent = paused ? "Paused" : live ? `${live} active` : "";
+    $armed.title = paused ? "The master switch is off \u2014 no redirect is running, and the list is kept" : live ? `${live} of ${rules.length} redirect${rules.length === 1 ? "" : "s"} are live \u2014 matching requests are served from localhost` : "";
+    $armed.classList.toggle("is-paused", paused);
+    $armed.hidden = !paused && !live;
+    $ruleIdle.hidden = rules.length > 0;
+    $panelRedirect.classList.toggle("paused", !globalEnabled && rules.length > 0);
+  }
+  function setRuleEnabled(id, enabled) {
+    rules = rules.map((entry) => entry.id === id ? { ...entry, enabled } : entry);
+    void chrome.storage.local.set({ entries: rules });
+    const row = $rules.querySelector(`[data-toggle="${id}"]`)?.closest(".rule");
+    row?.classList.toggle("off", !enabled);
+    paintHeader();
+  }
+  function renderRules() {
+    paintHeader();
+    $rules.innerHTML = rules.map((entry) => {
+      const state = probes.get(entry.port);
+      const dot = state === void 0 ? '<span class="probe" title="Checking the port\u2026">\xB7</span>' : state ? `<span class="probe up" title="Something is listening on :${entry.port}"></span>` : `<span class="probe down" title="Nothing is listening on :${entry.port} \u2014 the redirect will fail"></span>`;
+      const name = labelOf(entry);
+      const here = matchedHere.has(entry.id) ? '<span class="rhere" title="This redirect matched a request on the page you are looking at">on this page</span>' : "";
+      return `<li class="rule${entry.enabled ? "" : " off"}${entry.id === editingId ? " editing" : ""}"><label class="tgl" title="${entry.enabled ? "Disable" : "Enable"} this redirect"><input type="checkbox" data-toggle="${entry.id}"${entry.enabled ? " checked" : ""} data-testid="checkbox-redirect-${entry.id}" /><span class="track"></span></label>${dot}<span class="rmain"><input class="rname" value="${escapeHtml(name)}" data-name="${entry.id}" spellcheck="false" aria-label="Name" title="Click to rename \u2014 blank restores \u201C${escapeHtml(deriveName(entry.path))}\u201D" data-testid="textbox-redirect-name-${entry.id}" /><span class="rsub"><span class="rpath" title="${escapeHtml(targetUrl(entry))}">${escapeHtml(entry.path)}</span>${here}</span></span><input class="rport" type="text" inputmode="numeric" value="${entry.port}" data-port="${entry.id}" aria-label="Port for ${escapeHtml(name)}" data-testid="textbox-redirect-port-${entry.id}" /><button class="rdel" type="button" data-edit="${entry.id}" title="Edit path and port" data-testid="button-redirect-edit-${entry.id}"><svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M11.4 2.3a1.5 1.5 0 0 1 2.1 2.1L5.8 12.2l-2.9.8.8-2.9 7.7-7.8Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg></button><button class="rdel" type="button" data-del="${entry.id}" title="Remove ${escapeHtml(name)}" data-testid="button-redirect-remove-${entry.id}">\u2715</button></li>`;
+    }).join("");
+    for (const box of $rules.querySelectorAll("[data-toggle]")) {
+      box.addEventListener("change", () => setRuleEnabled(Number(box.dataset.toggle), box.checked));
+    }
+    for (const field of $rules.querySelectorAll("[data-name]")) {
+      field.addEventListener("change", () => {
+        const id = Number(field.dataset.name);
+        const entry = rules.find((candidate) => candidate.id === id);
+        if (!entry) return;
+        const typed = field.value.trim();
+        rules = rules.map((candidate) => candidate.id === id ? { ...candidate, label: typed } : candidate);
+        void chrome.storage.local.set({ entries: rules });
+        field.value = labelOf({ ...entry, label: typed });
+      });
+      field.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") field.blur();
+      });
+    }
+    for (const field of $rules.querySelectorAll("[data-port]")) {
+      field.addEventListener("change", () => {
+        const id = Number(field.dataset.port);
+        const port = parsePort(field.value);
+        if (port === null) {
+          toast("Port must be 1\u201365535");
+          renderRules();
+          return;
+        }
+        saveRules(rules.map((entry) => entry.id === id ? { ...entry, port } : entry));
+        void probePorts();
+      });
+    }
+    for (const button of $rules.querySelectorAll("[data-edit]")) {
+      button.addEventListener("click", () => startEditing(Number(button.dataset.edit)));
+    }
+    for (const button of $rules.querySelectorAll("[data-del]")) {
+      button.addEventListener("click", () => {
+        const id = Number(button.dataset.del);
+        if (id === editingId) stopEditing();
+        saveRules(rules.filter((entry) => entry.id !== id));
+      });
+    }
+  }
+  var probes = /* @__PURE__ */ new Map();
+  var matchedHere = /* @__PURE__ */ new Set();
+  async function canReadMatches() {
+    if (!chrome.declarativeNetRequest?.getMatchedRules) return false;
+    if (!chrome.permissions?.contains) return true;
+    try {
+      return await chrome.permissions.contains({ permissions: ["declarativeNetRequestFeedback"] });
+    } catch {
+      return false;
+    }
+  }
+  async function readMatched() {
+    matchedHere = /* @__PURE__ */ new Set();
+    if (!await canReadMatches()) {
+      setNotice(
+        "Redirects are working. Only the \u201Con this page\u201D label is off: it needs a permission Chrome grants on install, not on Reload. Remove the extension and Load unpacked again to turn it on.",
+        true
+      );
+      renderRules();
+      return;
+    }
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id !== void 0) {
+        const { rulesMatchedInfo } = await chrome.declarativeNetRequest.getMatchedRules({ tabId: tab.id });
+        matchedHere = new Set(rulesMatchedInfo.map((info) => info.rule.ruleId));
+      }
+    } catch (error) {
+      console.warn("[Dev Inspectors] could not read matched rules:", error);
+    }
+    renderRules();
+  }
+  async function probePorts() {
+    const unknown = [...new Set(rules.map((entry) => entry.port))].filter((port) => !probes.has(port));
+    if (!unknown.length) return;
+    await Promise.all(
+      unknown.map(async (port) => {
+        try {
+          await fetch(`http://localhost:${port}/`, { mode: "no-cors", cache: "no-store" });
+          probes.set(port, true);
+        } catch {
+          probes.set(port, false);
+        }
+      })
+    );
+    renderRules();
+  }
+  $global.addEventListener("change", () => {
+    globalEnabled = $global.checked;
+    void chrome.storage.local.set({ globalEnabled });
+    paintHeader();
+  });
+  var editingId = null;
+  function startEditing(id) {
+    const entry = rules.find((candidate) => candidate.id === id);
+    if (!entry) return;
+    editingId = id;
+    $rPath.value = entry.path;
+    $rPort.value = String(entry.port);
+    $rAdd.textContent = "Save";
+    $rCancel.hidden = false;
+    $addRule.classList.add("editing");
+    renderRules();
+    $rPath.focus();
+    $rPath.select();
+  }
+  function stopEditing() {
+    const wasEditing = editingId !== null;
+    editingId = null;
+    $rPath.value = "";
+    $rPort.value = String(DEFAULT_PORT);
+    $rAdd.textContent = "Add";
+    $rCancel.hidden = true;
+    $addRule.classList.remove("editing");
+    if (wasEditing) renderRules();
+  }
+  var UNSCANNABLE = /^(chrome|chrome-extension|edge|about|devtools|view-source|file):|^https:\/\/chromewebstore\.google\.com/;
+  async function scanPage() {
+    $scan.classList.add("is-busy");
+    try {
+      if (!chrome.scripting?.executeScript) {
+        setNotice(
+          "Scan page needs the scripting permission, which Chrome grants on install and not on Reload. Remove the extension and Load unpacked again. Redirects are unaffected.",
+          true
+        );
+        return;
+      }
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id === void 0) {
+        toast("No page to scan");
+        return;
+      }
+      if (tab.url && UNSCANNABLE.test(tab.url)) {
+        toast("Browser pages cannot be scanned");
+        return;
+      }
+      const [injection] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        /**
+         * Script tags first, resource timing second.
+         *
+         * The resource buffer holds 250 entries by default and then silently drops
+         * everything after — an app this size passes that during startup, so the
+         * remotes are often simply not in it. `@angular-extensions/elements` loads
+         * every micro-app with `createElement('script')`, and a script tag stays in
+         * the DOM as long as the page lives, with no cap. Timing entries still add
+         * anything fetched some other way.
+         */
+        func: () => {
+          const urls = /* @__PURE__ */ new Set();
+          for (const tag of document.querySelectorAll("script[src]")) urls.add(tag.src);
+          for (const entry of performance.getEntriesByType("resource")) urls.add(entry.name);
+          return [...urls];
+        }
+      });
+      setNotice("");
+      renderFound(injection?.result ?? []);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      setNotice(`Scan page failed: ${reason}`, true);
+      console.warn("[Dev Inspectors] scan failed:", error);
+    } finally {
+      $scan.classList.remove("is-busy");
+    }
+  }
+  var scanned = [];
+  function renderFound(urls) {
+    scanned = urls;
+    $found.hidden = false;
+    const paths = moduleCandidates(urls);
+    if (!paths.length) {
+      const scripts = urls.filter((url) => /\.js(\?|#|$)/.test(url)).length;
+      $foundLabel.textContent = scripts ? `No module bundles among ${scripts} scripts on this page` : "No scripts visible on this page";
+      $foundList.innerHTML = "";
+      return;
+    }
+    const known = new Set(rules.map((entry) => entry.path));
+    $foundLabel.textContent = `${paths.length} bundle${paths.length === 1 ? "" : "s"} on this page`;
+    $foundList.innerHTML = paths.map((path) => {
+      const already = known.has(path);
+      return `<li><span class="fpath" title="${escapeHtml(path)}">${escapeHtml(path)}</span>` + (already ? `<span class="fadded">added</span>` : `<button type="button" data-pick="${escapeHtml(path)}" title="Add a redirect for ${escapeHtml(path)}">+ Add</button>`) + `</li>`;
+    }).join("");
+    for (const button of $foundList.querySelectorAll("[data-pick]")) {
+      button.addEventListener("click", () => {
+        const path = button.dataset.pick ?? "";
+        const port = parsePort($rPort.value) ?? DEFAULT_PORT;
+        saveRules(addEntry(rules, path, port));
+        renderFound(scanned);
+        void probePorts();
+      });
+    }
+  }
+  $scan.addEventListener("click", () => void scanPage());
+  $foundClose.addEventListener("click", () => {
+    $found.hidden = true;
+  });
+  $rCancel.addEventListener("click", () => {
+    stopEditing();
+    $rPath.focus();
+  });
+  $rPath.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && editingId !== null) {
+      event.preventDefault();
+      stopEditing();
+    }
+  });
+  $addRule.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const path = normalizePath($rPath.value);
+    if (!path) {
+      toast("Enter a module path or a URL");
+      return;
+    }
+    const port = parsePort($rPort.value);
+    if (port === null) {
+      toast("Port must be 1\u201365535");
+      return;
+    }
+    if (editingId !== null) {
+      const clash = rules.some((entry) => entry.id !== editingId && entry.path === path);
+      if (clash) {
+        toast("Another redirect already uses that path");
+        return;
+      }
+      saveRules(rules.map((entry) => entry.id === editingId ? { ...entry, path, port } : entry));
+      stopEditing();
+    } else {
+      saveRules(addEntry(rules, path, port));
+      $rPath.value = "";
+    }
+    $rPath.focus();
+    void probePorts();
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    const entries = changes.entries?.newValue;
+    const flag = changes.globalEnabled?.newValue;
+    const listMoved = entries !== void 0 && JSON.stringify(entries) !== JSON.stringify(rules);
+    const flagMoved = flag !== void 0 && flag !== globalEnabled;
+    if (listMoved || flagMoved) void loadRules();
+  });
   setUpEyeDropper();
   setUpFold();
   applyLens(localStorage.getItem(LENS_KEY) ?? "colors");

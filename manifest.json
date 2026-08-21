@@ -1,10 +1,27 @@
 {
 	"manifest_version": 3,
 	"name": "Dev Inspectors",
-	"version": "0.3.0",
-	"description": "Find the design system token for a colour or shadow, and check which icons have shipped to each environment.",
+	"version": "0.5.0",
+	"description": "Look up a design system token, check which icons have shipped, and point a deployed module at your local build.",
+	"permissions": ["activeTab", "declarativeNetRequest", "declarativeNetRequestFeedback", "scripting", "storage"],
+	"host_permissions": ["<all_urls>"],
+	"background": {
+		"service_worker": "background.js"
+	},
+	"icons": {
+		"16": "icons/icon16.png",
+		"32": "icons/icon32.png",
+		"48": "icons/icon48.png",
+		"128": "icons/icon128.png"
+	},
 	"action": {
 		"default_popup": "popup/index.html",
-		"default_title": "Dev Inspectors"
+		"default_title": "Dev Inspectors",
+		"default_icon": {
+			"16": "icons/icon16.png",
+			"32": "icons/icon32.png",
+			"48": "icons/icon48.png",
+			"128": "icons/icon128.png"
+		}
 	}
 }

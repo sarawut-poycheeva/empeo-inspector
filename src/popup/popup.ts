@@ -12,6 +12,20 @@ import {
 	type Icon,
 	type ParsedIcon,
 } from "../shared/icons.ts";
+import {
+	activeCount,
+	addEntry,
+	DEFAULT_PORT,
+	deriveName,
+	labelOf,
+	moduleCandidates,
+	normalizePath,
+	parsePort,
+	REDIRECT_STORAGE_KEYS,
+	targetUrl,
+	type RedirectEntry,
+	type RedirectState,
+} from "../shared/redirect.ts";
 import { TOKENS } from "../shared/tokens.generated.ts";
 import {
 	brandsOf,
@@ -91,6 +105,25 @@ const $icPartial = document.getElementById("ic-partial") as HTMLButtonElement;
 const $viewCards = document.getElementById("view-cards") as HTMLButtonElement;
 const $viewGrid = document.getElementById("view-grid") as HTMLButtonElement;
 const $refresh = document.getElementById("refresh") as HTMLButtonElement;
+
+const $search = document.querySelector(".search") as HTMLElement;
+const $lensRedirect = document.getElementById("lens-redirect") as HTMLButtonElement;
+const $panelRedirect = document.getElementById("panel-redirect") as HTMLElement;
+const $rules = document.getElementById("rules") as HTMLElement;
+const $ruleIdle = document.getElementById("ruleidle") as HTMLElement;
+const $notice = document.getElementById("rnotice") as HTMLElement;
+const $global = document.getElementById("global") as HTMLInputElement;
+const $armed = document.getElementById("armed") as HTMLElement;
+const $addRule = document.getElementById("addrule") as HTMLFormElement;
+const $rPath = document.getElementById("rpath") as HTMLInputElement;
+const $rPort = document.getElementById("rport") as HTMLInputElement;
+const $rAdd = document.getElementById("radd") as HTMLButtonElement;
+const $rCancel = document.getElementById("rcancel") as HTMLButtonElement;
+const $scan = document.getElementById("scan") as HTMLButtonElement;
+const $found = document.getElementById("found") as HTMLElement;
+const $foundLabel = document.getElementById("foundlbl") as HTMLElement;
+const $foundList = document.getElementById("foundlist") as HTMLElement;
+const $foundClose = document.getElementById("foundclose") as HTMLButtonElement;
 
 const brands = brandsOf(TOKENS);
 let brand = brands.includes("empeo") ? "empeo" : brands[0];
@@ -746,7 +779,7 @@ async function loadIcons(hard = false): Promise<void> {
 // ==================== lens switching ====================
 
 const LENS_KEY = "ds-colors:lens";
-type Lens = "colors" | "icons";
+type Lens = "colors" | "icons" | "redirect";
 let lens: Lens = "colors";
 
 /**
@@ -755,31 +788,37 @@ let lens: Lens = "colors";
  * made switching lenses land on "No result" every time, so each lens keeps its
  * own query and gets it back on return.
  */
-const queries: Record<Lens, string> = { colors: "", icons: "" };
+const queries: Record<Lens, string> = { colors: "", icons: "", redirect: "" };
 
 function applyLens(next: Lens): void {
 	if (next !== lens) queries[lens] = $q.value;
 	lens = next;
-	const isIcons = next === "icons";
 
 	$q.value = queries[next];
 
-	$lensColors.setAttribute("aria-selected", String(!isIcons));
-	$lensIcons.setAttribute("aria-selected", String(isIcons));
-	$panelColors.hidden = isIcons;
-	$panelIcons.hidden = !isIcons;
+	for (const [tab, panel, name] of [
+		[$lensColors, $panelColors, "colors"],
+		[$lensIcons, $panelIcons, "icons"],
+		[$lensRedirect, $panelRedirect, "redirect"],
+	] as const) {
+		tab.setAttribute("aria-selected", String(next === name));
+		panel.hidden = next !== name;
+	}
 
 	// The brand only affects colour tokens, and the eyedropper only feeds a hex.
-	$brand.hidden = isIcons;
-	$pick.hidden = isIcons || !window.EyeDropper;
+	$brand.hidden = next !== "colors";
+	$pick.hidden = next !== "colors" || !window.EyeDropper;
 
-	$q.placeholder = isIcons
-		? "Search icons by name or codepoint"
-		: "Paste hex, box-shadow or token name";
+	// The redirect lens has no search: its list is a handful of rows, and its own
+	// input takes a path, which has nothing to do with either other lens.
+	$search.hidden = next === "redirect";
+
+	$q.placeholder = next === "icons" ? "Search icons by name or codepoint" : "Paste hex, box-shadow or token name";
 
 	localStorage.setItem(LENS_KEY, next);
 
-	if (isIcons) void loadIcons();
+	if (next === "icons") void loadIcons();
+	if (next === "redirect") void loadRules();
 	renderCurrent();
 }
 
@@ -787,7 +826,7 @@ function renderCurrent(): void {
 	if (lens === "icons") {
 		syncSearchChrome();
 		scheduleIconRender();
-	} else {
+	} else if (lens === "colors") {
 		renderAnswer();
 	}
 }
@@ -807,8 +846,16 @@ function scheduleIconRender(): void {
 	}, 70);
 }
 
-$lensColors.addEventListener("click", () => applyLens("colors"));
-$lensIcons.addEventListener("click", () => applyLens("icons"));
+// Driven off the same table applyLens paints from, so adding a lens cannot leave
+// a tab that renders but does nothing — which is exactly what happened when
+// these were three hand-written lines and the third was never added.
+for (const [tab, name] of [
+	[$lensColors, "colors"],
+	[$lensIcons, "icons"],
+	[$lensRedirect, "redirect"],
+] as const) {
+	tab.addEventListener("click", () => applyLens(name));
+}
 
 function setIconFilter(next: typeof iconFilter): void {
 	iconFilter = next;
@@ -1003,6 +1050,542 @@ function setUpFold(): void {
 		applyFold(folded);
 	});
 }
+
+// ==================== redirect lens ====================
+
+/**
+ * Point a deployed Module Federation bundle at a local build, so a change can be
+ * verified against real UAT data without deploying.
+ *
+ * State lives in `chrome.storage.local`, not `localStorage`, because the service
+ * worker is the only thing allowed to touch the rules and it cannot read a page's
+ * `localStorage`. The popup writes; the worker reacts. That split is what stops
+ * the live rule set from drifting away from the list on screen.
+ */
+let rules: RedirectEntry[] = [];
+let globalEnabled = true;
+
+/**
+ * The banner is the only channel this lens has for "you are looking at something
+ * that cannot work". Everything that writes it goes through here so two causes
+ * cannot half-overwrite each other.
+ */
+function setNotice(text: string, mild = false): void {
+	$notice.textContent = text;
+	$notice.hidden = !text;
+	$notice.classList.toggle("mild", mild);
+}
+
+async function readRedirectState(): Promise<RedirectState> {
+	const stored = (await chrome.storage.local.get(REDIRECT_STORAGE_KEYS)) as Partial<RedirectState>;
+	return { globalEnabled: stored.globalEnabled !== false, entries: stored.entries ?? [] };
+}
+
+function saveRules(next: RedirectEntry[]): void {
+	rules = next;
+	void chrome.storage.local.set({ entries: next });
+	renderRules();
+}
+
+async function loadRules(): Promise<void> {
+	const state = await readRedirectState();
+	rules = state.entries;
+	globalEnabled = state.globalEnabled;
+	$global.checked = globalEnabled;
+
+	// Without the API the lens still writes and lists entries perfectly, and
+	// redirects nothing at all — the worst kind of broken. Say it here rather than
+	// only in a service-worker console nobody opens.
+	setNotice(
+		chrome.declarativeNetRequest
+			? ""
+			: "Chrome is running this with an older permission set, so nothing is being redirected. Remove the extension and Load unpacked again — Reload does not grant new permissions.",
+	);
+
+	renderRules();
+	void probePorts();
+	void readMatched();
+}
+
+/** Counts and paused styling — everything that changes on a toggle. */
+function paintHeader(): void {
+	// Counts rules that are live right now, which is not the same as rules in the
+	// list: five entries with two switches on is "2 active". The distinction is
+	// the whole point of the number, so the label has to survive being read cold.
+	const live = activeCount({ globalEnabled, entries: rules });
+	const paused = !globalEnabled && rules.length > 0;
+
+	// Rows keep their own switch when the master is off, so without a word here
+	// the list looks armed while nothing is actually redirecting.
+	$armed.textContent = paused ? "Paused" : live ? `${live} active` : "";
+	$armed.title = paused
+		? "The master switch is off — no redirect is running, and the list is kept"
+		: live
+			? `${live} of ${rules.length} redirect${rules.length === 1 ? "" : "s"} are live — matching requests are served from localhost`
+			: "";
+	$armed.classList.toggle("is-paused", paused);
+	$armed.hidden = !paused && !live;
+	$ruleIdle.hidden = rules.length > 0;
+	$panelRedirect.classList.toggle("paused", !globalEnabled && rules.length > 0);
+}
+
+/**
+ * Flipping a switch must not rebuild the list.
+ *
+ * It used to call the full render, which replaced the very `<input>` being
+ * clicked: the knob jumped instead of sliding, focus was lost, and the write
+ * echoed back through `storage.onChanged` into a second rebuild plus a network
+ * probe. Three renders and a round trip per click is what made the switch feel
+ * stuck. Only the row's own class and the header actually change here.
+ */
+function setRuleEnabled(id: number, enabled: boolean): void {
+	rules = rules.map((entry) => (entry.id === id ? { ...entry, enabled } : entry));
+	void chrome.storage.local.set({ entries: rules });
+
+	const row = $rules.querySelector<HTMLElement>(`[data-toggle="${id}"]`)?.closest<HTMLElement>(".rule");
+	row?.classList.toggle("off", !enabled);
+	paintHeader();
+}
+
+function renderRules(): void {
+	paintHeader();
+
+	$rules.innerHTML = rules
+		.map((entry) => {
+			const state = probes.get(entry.port);
+			const dot =
+				state === undefined
+					? '<span class="probe" title="Checking the port…">·</span>'
+					: state
+						? `<span class="probe up" title="Something is listening on :${entry.port}"></span>`
+						: `<span class="probe down" title="Nothing is listening on :${entry.port} — the redirect will fail"></span>`;
+
+			const name = labelOf(entry);
+			const here = matchedHere.has(entry.id)
+				? '<span class="rhere" title="This redirect matched a request on the page you are looking at">on this page</span>'
+				: "";
+
+			return (
+				`<li class="rule${entry.enabled ? "" : " off"}${entry.id === editingId ? " editing" : ""}">` +
+				`<label class="tgl" title="${entry.enabled ? "Disable" : "Enable"} this redirect">` +
+				`<input type="checkbox" data-toggle="${entry.id}"${entry.enabled ? " checked" : ""} ` +
+				`data-testid="checkbox-redirect-${entry.id}" /><span class="track"></span></label>` +
+				`${dot}` +
+				`<span class="rmain">` +
+				`<input class="rname" value="${escapeHtml(name)}" data-name="${entry.id}" spellcheck="false" ` +
+				`aria-label="Name" title="Click to rename — blank restores “${escapeHtml(deriveName(entry.path))}”" ` +
+				`data-testid="textbox-redirect-name-${entry.id}" />` +
+				`<span class="rsub"><span class="rpath" title="${escapeHtml(targetUrl(entry))}">${escapeHtml(entry.path)}</span>${here}</span>` +
+				`</span>` +
+				`<input class="rport" type="text" inputmode="numeric" value="${entry.port}" ` +
+				`data-port="${entry.id}" aria-label="Port for ${escapeHtml(name)}" ` +
+				`data-testid="textbox-redirect-port-${entry.id}" />` +
+				`<button class="rdel" type="button" data-edit="${entry.id}" title="Edit path and port" ` +
+				`data-testid="button-redirect-edit-${entry.id}">` +
+				`<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">` +
+				`<path d="M11.4 2.3a1.5 1.5 0 0 1 2.1 2.1L5.8 12.2l-2.9.8.8-2.9 7.7-7.8Z" fill="none" ` +
+				`stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg></button>` +
+				`<button class="rdel" type="button" data-del="${entry.id}" title="Remove ${escapeHtml(name)}" ` +
+				`data-testid="button-redirect-remove-${entry.id}">✕</button></li>`
+			);
+		})
+		.join("");
+
+	for (const box of $rules.querySelectorAll<HTMLInputElement>("[data-toggle]")) {
+		box.addEventListener("change", () => setRuleEnabled(Number(box.dataset.toggle), box.checked));
+	}
+
+	for (const field of $rules.querySelectorAll<HTMLInputElement>("[data-name]")) {
+		// Renaming changes no rule, so this writes state without touching the DOM —
+		// re-rendering here would yank the field out from under the cursor.
+		field.addEventListener("change", () => {
+			const id = Number(field.dataset.name);
+			const entry = rules.find((candidate) => candidate.id === id);
+			if (!entry) return;
+
+			const typed = field.value.trim();
+			rules = rules.map((candidate) => (candidate.id === id ? { ...candidate, label: typed } : candidate));
+			void chrome.storage.local.set({ entries: rules });
+
+			// Blank means "go back to the derived name" rather than "no name".
+			field.value = labelOf({ ...entry, label: typed });
+		});
+
+		field.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") field.blur();
+		});
+	}
+
+	for (const field of $rules.querySelectorAll<HTMLInputElement>("[data-port]")) {
+		field.addEventListener("change", () => {
+			const id = Number(field.dataset.port);
+			const port = parsePort(field.value);
+			if (port === null) {
+				toast("Port must be 1–65535");
+				renderRules();
+				return;
+			}
+			saveRules(rules.map((entry) => (entry.id === id ? { ...entry, port } : entry)));
+			void probePorts();
+		});
+	}
+
+	for (const button of $rules.querySelectorAll<HTMLButtonElement>("[data-edit]")) {
+		button.addEventListener("click", () => startEditing(Number(button.dataset.edit)));
+	}
+
+	for (const button of $rules.querySelectorAll<HTMLButtonElement>("[data-del]")) {
+		button.addEventListener("click", () => {
+			const id = Number(button.dataset.del);
+			// Deleting what is being edited would leave the form pointed at nothing.
+			if (id === editingId) stopEditing();
+			saveRules(rules.filter((entry) => entry.id !== id));
+		});
+	}
+}
+
+/**
+ * Is anything actually listening?
+ *
+ * The failure that costs the most time is a redirect pointing at a server that
+ * was never started, or was stopped hours ago: the page simply breaks, with
+ * nothing to say why. A `no-cors` request cannot read the status — an opaque
+ * response comes back for a 404 just as much as a 200 — so this claims only what
+ * it can prove: the port answered. That is exactly the failure worth catching.
+ */
+const probes = new Map<number, boolean>();
+
+/**
+ * Which rules actually fired on the page you are looking at.
+ *
+ * "Armed" and "did something here" are different questions, and only the second
+ * one tells you whether the module you are debugging is really coming from your
+ * machine. Chrome keeps a per-tab log of matched rules; the rule ids in it are
+ * our entry ids, because `buildDnrRule` uses the entry id as the rule id.
+ *
+ * Reading it needs `declarativeNetRequestFeedback`. Only the tab id is used, so
+ * no `tabs` permission — that one gates the url and title, which are none of
+ * this lens's business.
+ */
+let matchedHere = new Set<number>();
+
+/**
+ * Ask whether we may, instead of trying and being told off.
+ *
+ * The API object exists as soon as `declarativeNetRequest` is granted, so its
+ * presence says nothing about `declarativeNetRequestFeedback` — which Chrome
+ * grants on install and not on Reload. Calling anyway throws, and every throw is
+ * collected into the Errors page on chrome://extensions, which never clears
+ * itself: a state that is known, expected and already explained in the UI ends
+ * up sitting there looking like a crash. `chrome.permissions.contains` needs no
+ * permission of its own, so the question is free to ask.
+ */
+async function canReadMatches(): Promise<boolean> {
+	if (!chrome.declarativeNetRequest?.getMatchedRules) return false;
+	if (!chrome.permissions?.contains) return true; // old Chrome: let the call decide
+
+	try {
+		return await chrome.permissions.contains({ permissions: ["declarativeNetRequestFeedback"] });
+	} catch {
+		return false;
+	}
+}
+
+async function readMatched(): Promise<void> {
+	matchedHere = new Set();
+
+	if (!(await canReadMatches())) {
+		// Mild, and leading with what still works: an alarming banner about a label
+		// would send someone hunting a redirect bug that does not exist.
+		setNotice(
+			"Redirects are working. Only the “on this page” label is off: it needs a permission Chrome grants on install, not on Reload. " +
+				"Remove the extension and Load unpacked again to turn it on.",
+			true,
+		);
+		renderRules();
+		return;
+	}
+
+	try {
+		const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+		if (tab?.id !== undefined) {
+			const { rulesMatchedInfo } = await chrome.declarativeNetRequest.getMatchedRules({ tabId: tab.id });
+			matchedHere = new Set(rulesMatchedInfo.map((info) => info.rule.ruleId));
+		}
+	} catch (error) {
+		// Permission is held, so this is something unexpected — quota, or a tab that
+		// went away. Worth seeing in the Errors page, unlike the case above.
+		console.warn("[Dev Inspectors] could not read matched rules:", error);
+	}
+
+	renderRules();
+}
+
+/**
+ * Only ports never seen this session, so a toggle costs nothing on the network.
+ * The map is module scope, so reopening the popup re-checks everything — which is
+ * the right granularity: a dev server does not usually stop while the popup is
+ * open, and it very often has while it was closed.
+ */
+async function probePorts(): Promise<void> {
+	const unknown = [...new Set(rules.map((entry) => entry.port))].filter((port) => !probes.has(port));
+	if (!unknown.length) return;
+
+	await Promise.all(
+		unknown.map(async (port) => {
+			try {
+				await fetch(`http://localhost:${port}/`, { mode: "no-cors", cache: "no-store" });
+				probes.set(port, true);
+			} catch {
+				probes.set(port, false);
+			}
+		}),
+	);
+
+	renderRules();
+}
+
+$global.addEventListener("change", () => {
+	globalEnabled = $global.checked;
+	void chrome.storage.local.set({ globalEnabled });
+	paintHeader(); // no row changes, so the list must not be rebuilt either
+});
+
+/**
+ * Editing reuses the add form rather than turning the row into one.
+ *
+ * A row that becomes editable in place has to hold two inputs, a save and a
+ * cancel, in the same width that already carries a switch, a port and two
+ * buttons — and every row has to be built ready for it. Sending the values down
+ * to the form that already exists costs one piece of state and reads as one
+ * place where paths get typed, whether they are new or not.
+ */
+let editingId: number | null = null;
+
+function startEditing(id: number): void {
+	const entry = rules.find((candidate) => candidate.id === id);
+	if (!entry) return;
+
+	editingId = id;
+	$rPath.value = entry.path;
+	$rPort.value = String(entry.port);
+	$rAdd.textContent = "Save";
+	$rCancel.hidden = false;
+	$addRule.classList.add("editing");
+
+	renderRules(); // marks which row is being edited
+	$rPath.focus();
+	$rPath.select();
+}
+
+function stopEditing(): void {
+	const wasEditing = editingId !== null;
+
+	editingId = null;
+	$rPath.value = "";
+	$rPort.value = String(DEFAULT_PORT);
+	$rAdd.textContent = "Add";
+	$rCancel.hidden = true;
+	$addRule.classList.remove("editing");
+
+	if (wasEditing) renderRules();
+}
+
+/**
+ * Read what the page actually loaded, instead of asking someone to remember it.
+ *
+ * `performance.getEntriesByType("resource")` is already in every page, listing
+ * every request it made — no network interception, no background listener that a
+ * sleeping service worker would miss, and nothing to keep in sync. The injected
+ * function has to be self-contained: it runs in the page, where none of this
+ * file's scope exists, so the filtering happens back here.
+ *
+ * `activeTab` is what makes this narrow: clicking the toolbar icon grants access
+ * to that one tab, and it lapses when the tab navigates. It cannot read a tab you
+ * did not open the popup on.
+ */
+/** Pages no extension may touch, whatever it was granted. */
+const UNSCANNABLE = /^(chrome|chrome-extension|edge|about|devtools|view-source|file):|^https:\/\/chromewebstore\.google\.com/;
+
+async function scanPage(): Promise<void> {
+	$scan.classList.add("is-busy");
+
+	try {
+		// Same trap as the feedback permission: `scripting` arrives on install, not
+		// on Reload, and reaching through a missing namespace throws a TypeError that
+		// says nothing about why. Ask first.
+		if (!chrome.scripting?.executeScript) {
+			setNotice(
+				"Scan page needs the scripting permission, which Chrome grants on install and not on Reload. " +
+					"Remove the extension and Load unpacked again. Redirects are unaffected.",
+				true,
+			);
+			return;
+		}
+
+		const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+		if (tab?.id === undefined) {
+			toast("No page to scan");
+			return;
+		}
+
+		if (tab.url && UNSCANNABLE.test(tab.url)) {
+			toast("Browser pages cannot be scanned");
+			return;
+		}
+
+		const [injection] = await chrome.scripting.executeScript({
+			target: { tabId: tab.id },
+			/**
+			 * Script tags first, resource timing second.
+			 *
+			 * The resource buffer holds 250 entries by default and then silently drops
+			 * everything after — an app this size passes that during startup, so the
+			 * remotes are often simply not in it. `@angular-extensions/elements` loads
+			 * every micro-app with `createElement('script')`, and a script tag stays in
+			 * the DOM as long as the page lives, with no cap. Timing entries still add
+			 * anything fetched some other way.
+			 */
+			func: () => {
+				const urls = new Set<string>();
+				for (const tag of document.querySelectorAll<HTMLScriptElement>("script[src]")) urls.add(tag.src);
+				for (const entry of performance.getEntriesByType("resource")) urls.add(entry.name);
+				return [...urls];
+			},
+		});
+
+		setNotice(""); // a working scan retires whatever the last failure said
+		renderFound((injection?.result as string[] | undefined) ?? []);
+	} catch (error) {
+		// Never a bare "cannot": one message for every cause is what made this
+		// impossible to act on, and the reasons need different fixes — a missing
+		// permission, a page that refuses injection, an iframe that went away.
+		const reason = error instanceof Error ? error.message : String(error);
+		setNotice(`Scan page failed: ${reason}`, true);
+		console.warn("[Dev Inspectors] scan failed:", error);
+	} finally {
+		$scan.classList.remove("is-busy");
+	}
+}
+
+/** The last raw scan, so re-rendering after an add does not need another scan. */
+let scanned: string[] = [];
+
+function renderFound(urls: string[]): void {
+	scanned = urls;
+	$found.hidden = false;
+
+	const paths = moduleCandidates(urls);
+
+	if (!paths.length) {
+		// A bare negative is unactionable: "found nothing" and "saw nothing" need
+		// different fixes, and only the denominator tells them apart.
+		const scripts = urls.filter((url) => /\.js(\?|#|$)/.test(url)).length;
+		$foundLabel.textContent = scripts
+			? `No module bundles among ${scripts} scripts on this page`
+			: "No scripts visible on this page";
+		$foundList.innerHTML = "";
+		return;
+	}
+
+	const known = new Set(rules.map((entry) => entry.path));
+	$foundLabel.textContent = `${paths.length} bundle${paths.length === 1 ? "" : "s"} on this page`;
+
+	$foundList.innerHTML = paths
+		.map((path) => {
+			const already = known.has(path);
+			return (
+				`<li>` +
+				`<span class="fpath" title="${escapeHtml(path)}">${escapeHtml(path)}</span>` +
+				(already
+					? `<span class="fadded">added</span>`
+					: `<button type="button" data-pick="${escapeHtml(path)}" title="Add a redirect for ${escapeHtml(path)}">+ Add</button>`) +
+				`</li>`
+			);
+		})
+		.join("");
+
+	for (const button of $foundList.querySelectorAll<HTMLButtonElement>("[data-pick]")) {
+		button.addEventListener("click", () => {
+			const path = button.dataset.pick ?? "";
+			const port = parsePort($rPort.value) ?? DEFAULT_PORT;
+			saveRules(addEntry(rules, path, port));
+			renderFound(scanned); // the row it came from now reads "added"
+			void probePorts();
+		});
+	}
+}
+
+$scan.addEventListener("click", () => void scanPage());
+
+$foundClose.addEventListener("click", () => {
+	$found.hidden = true;
+});
+
+$rCancel.addEventListener("click", () => {
+	stopEditing();
+	$rPath.focus();
+});
+
+$rPath.addEventListener("keydown", (event) => {
+	if (event.key === "Escape" && editingId !== null) {
+		event.preventDefault();
+		stopEditing();
+	}
+});
+
+$addRule.addEventListener("submit", (event) => {
+	event.preventDefault();
+
+	const path = normalizePath($rPath.value);
+	if (!path) {
+		toast("Enter a module path or a URL");
+		return;
+	}
+
+	const port = parsePort($rPort.value);
+	if (port === null) {
+		toast("Port must be 1–65535");
+		return;
+	}
+
+	if (editingId !== null) {
+		// Editing a path onto one that already exists would leave two rules racing
+		// over the same request, which is the case `addEntry` exists to prevent.
+		const clash = rules.some((entry) => entry.id !== editingId && entry.path === path);
+		if (clash) {
+			toast("Another redirect already uses that path");
+			return;
+		}
+
+		saveRules(rules.map((entry) => (entry.id === editingId ? { ...entry, path, port } : entry)));
+		stopEditing();
+	} else {
+		saveRules(addEntry(rules, path, port));
+		$rPath.value = "";
+	}
+
+	$rPath.focus();
+	void probePorts();
+});
+
+/**
+ * Another popup window can change this underneath us, so listening is right —
+ * but our own writes echo back through here too. Reloading on those rebuilt the
+ * list under the user's finger. Comparing against what is already on screen is
+ * enough to tell the two apart, and needs no bookkeeping to stay honest.
+ */
+chrome.storage.onChanged.addListener((changes, area) => {
+	if (area !== "local") return;
+
+	const entries = changes.entries?.newValue as RedirectEntry[] | undefined;
+	const flag = changes.globalEnabled?.newValue as boolean | undefined;
+
+	const listMoved = entries !== undefined && JSON.stringify(entries) !== JSON.stringify(rules);
+	const flagMoved = flag !== undefined && flag !== globalEnabled;
+
+	if (listMoved || flagMoved) void loadRules();
+});
 
 setUpEyeDropper();
 setUpFold();

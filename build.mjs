@@ -8,7 +8,7 @@ await rm(outdir, { recursive: true, force: true });
 await mkdir(`${outdir}/popup`, { recursive: true });
 
 const options = {
-	entryPoints: { "popup/popup": "src/popup/popup.ts" },
+	entryPoints: { "popup/popup": "src/popup/popup.ts", background: "src/background.ts" },
 	outdir,
 	bundle: true,
 	format: "iife",
@@ -18,6 +18,7 @@ const options = {
 
 async function copyStatic() {
 	await cp("manifest.json", `${outdir}/manifest.json`);
+	await cp("icons", `${outdir}/icons`, { recursive: true });
 	await cp("src/popup/index.html", `${outdir}/popup/index.html`);
 	await cp("src/popup/popup.css", `${outdir}/popup/popup.css`);
 }
