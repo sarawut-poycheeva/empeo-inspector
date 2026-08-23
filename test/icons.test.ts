@@ -4,7 +4,9 @@ import { test } from "node:test";
 import {
 	classOf,
 	codeLabelOf,
+	fontFamilyOf,
 	glyphOf,
+	glyphSourceOf,
 	ICON_ENVS,
 	ICON_PREFIX,
 	iconCssUrl,
@@ -57,6 +59,25 @@ test("glyphOf turns a codepoint into the character the font draws", () => {
 	assert.equal(glyphOf(icon, "uat"), String.fromCodePoint(0xe908));
 	// falls back to any environment rather than rendering nothing
 	assert.equal(glyphOf(icon, "prod"), String.fromCodePoint(0xe908));
+});
+
+test("the glyph carries the environment whose font can draw it", () => {
+	// The real case: dev and uat moved the wand to eab9, prod still has eab7.
+	// Drawing eab9 with prod's font showed whatever prod keeps in that slot.
+	const wand = { short: "empeo-magic-wand", codes: { dev: "eab9", uat: "eab9", prod: "eab7" }, envs: ["dev", "uat", "prod"] };
+
+	const source = glyphSourceOf(wand);
+	assert.deepEqual(source, { env: "dev", char: String.fromCodePoint(0xeab9) });
+	assert.equal(fontFamilyOf(source!.env), "gofive-dev", "and it must be drawn with that environment's font");
+});
+
+test("an icon only on prod is still drawn, with prod's font", () => {
+	const old = { short: "retired", codes: { prod: "e900" }, envs: ["prod"] };
+	assert.deepEqual(glyphSourceOf(old), { env: "prod", char: String.fromCodePoint(0xe900) });
+});
+
+test("an icon with no codepoint anywhere yields nothing rather than a wrong glyph", () => {
+	assert.equal(glyphSourceOf({ short: "ghost", codes: {}, envs: [] }), null);
 });
 
 test("merging happens by name, never by codepoint", () => {
@@ -132,7 +153,7 @@ test("an empty query returns everything untouched", () => {
 test("every environment resolves to the same asset path", () => {
 	assert.equal(ICON_ENVS.length, 3);
 	for (const env of ICON_ENVS) {
-		assert.match(iconCssUrl(env), /^https:\/\/.+\/assets\/icons\/go5-icon\/style\.css$/);
+		assert.match(iconCssUrl(env, 1), /^https:\/\/.+\/assets\/icons\/go5-icon\/style\.css\?v=1$/);
 	}
 	assert.deepEqual(
 		ICON_ENVS.map((e) => e.id),
@@ -163,4 +184,17 @@ test("a codepoint shift is not an addition", () => {
 		),
 		[],
 	);
+});
+
+test("the stylesheet URL always carries a cache buster", () => {
+	// Not cosmetic: the file is `immutable` behind Cloudflare, and a bare URL was
+	// measured being served from the edge four days stale. A distinct URL is the
+	// only thing that gets past it, and it is what the app itself does.
+	for (const env of ICON_ENVS) {
+		assert.match(iconCssUrl(env), /\?v=\d+$/, "a default call must still bust the cache");
+	}
+
+	const a = iconCssUrl(ICON_ENVS[0], "a");
+	const b = iconCssUrl(ICON_ENVS[0], "b");
+	assert.notEqual(a, b, "different busters must produce different cache keys");
 });

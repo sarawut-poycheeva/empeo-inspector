@@ -783,13 +783,12 @@ details.more > div {
 /* The icon font is fetched straight from the asset CDN: it answers
    access-control-allow-origin: * and MV3's default CSP leaves font-src open,
    so this needs no host permission and no bundled copy. */
-@font-face {
-	font-family: "gofive";
-	src: url("https://apps-uat.gofive.co.th/assets/icons/go5-icon/fonts/gofive.woff") format("woff");
-	font-weight: normal;
-	font-style: normal;
-	font-display: block;
-}
+/* The @font-face that used to live here is gone on purpose.
+   A static rule cannot carry a cache buster, and the woff is served
+   `immutable` with a one-year max-age, so the browser kept the first copy it
+   ever downloaded — which is how the icon list came back fresh while the
+   glyphs stayed old. The fonts are registered from popup.ts instead, one per
+   environment, with the same buster as the stylesheet. */
 
 .envline {
 	font-family: var(--mono);
@@ -961,8 +960,10 @@ details.more > div {
 	min-width: 0;
 }
 
+/* The family is set per card, inline, because it has to match the environment
+   the codepoint came from. This is only the fallback for a card that has none. */
 .glyph {
-	font-family: "gofive";
+	font-family: "gofive-dev", "gofive-uat", "gofive-prod";
 	font-size: 17px;
 	line-height: 1;
 	flex: none;

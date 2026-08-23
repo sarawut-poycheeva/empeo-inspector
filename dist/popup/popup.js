@@ -7,9 +7,14 @@
     { id: "prod", label: "prod", base: "https://app.gofive.co.th/modules/" }
   ];
   var CSS_PATH = "assets/icons/go5-icon/style.css";
+  var FONT_PATH = "assets/icons/go5-icon/fonts/gofive.woff";
   var ICON_PREFIX = "gf-icon-";
-  function iconCssUrl(env) {
-    return env.base + CSS_PATH;
+  var ICON_FONT_FAMILY = "gofive";
+  function iconCssUrl(env, buster = Date.now()) {
+    return `${env.base}${CSS_PATH}?v=${buster}`;
+  }
+  function iconFontUrl(env, buster = Date.now()) {
+    return `${env.base}${FONT_PATH}?v=${buster}`;
   }
   function parseIconCss(css) {
     const found = /* @__PURE__ */ new Map();
@@ -40,9 +45,15 @@
   function classOf(icon) {
     return ICON_PREFIX + icon.short;
   }
-  function glyphOf(icon, fontEnv) {
-    const code = icon.codes[fontEnv] ?? Object.values(icon.codes)[0];
-    return code ? String.fromCodePoint(parseInt(code, 16)) : "";
+  function glyphSourceOf(icon) {
+    for (const env of ICON_ENVS) {
+      const code = icon.codes[env.id];
+      if (code) return { env: env.id, char: String.fromCodePoint(parseInt(code, 16)) };
+    }
+    return null;
+  }
+  function fontFamilyOf(envId) {
+    return `${ICON_FONT_FAMILY}-${envId}`;
   }
   function codeLabelOf(icon) {
     const seen = [];
@@ -2337,28 +2348,17 @@
     bindCopy($ans);
   }
   function renderHex(hex) {
-    const hits = findByHex(TOKENS, hex, brand);
-    const exact = hits.filter((h) => h.distance === 0).sort((a, b) => tokenRank(a.row) - tokenRank(b.row));
-    const near = hits.filter((h) => h.distance > 0);
-    if (exact.length) {
-      $ansLabel.textContent = `Exact match \xB7 ${hex}`;
-      $ans.innerHTML = answerCard(exact[0].row, hex, 0) + expander(
-        `${exact.length - 1} more tokens share this color`,
-        exact.slice(1, 10).map((h) => altRow(h.row, 0))
-      );
+    const exact = findByHex(TOKENS, hex, brand).filter((hit) => hit.distance === 0).sort((a, b) => tokenRank(a.row) - tokenRank(b.row));
+    if (!exact.length) {
+      $ansLabel.textContent = "Result";
+      $ans.innerHTML = NO_RESULT;
       return;
     }
-    if (near.length) {
-      $ansLabel.textContent = `No exact match \xB7 ${hex}`;
-      $ans.innerHTML = answerCard(near[0].row, hex, near[0].distance) + expander(
-        "Other close matches",
-        near.slice(1, 5).map((h) => altRow(h.row, h.distance)),
-        true
-      );
-      return;
-    }
-    $ansLabel.textContent = "Result";
-    $ans.innerHTML = NO_RESULT;
+    $ansLabel.textContent = `Exact match \xB7 ${hex}`;
+    $ans.innerHTML = answerCard(exact[0].row, hex, 0) + expander(
+      `${exact.length - 1} more tokens share this color`,
+      exact.slice(1, 10).map((h) => altRow(h.row, 0))
+    );
   }
   function renderShadow(value) {
     const hits = findByShadow(TOKENS, value, brand);
@@ -2520,12 +2520,44 @@
     } catch {
     }
   }
-  async function fetchIconSets(hard = false) {
-    const perEnv = {};
-    const modified = {};
+  var fontsLoaded = /* @__PURE__ */ new Set();
+  async function fontBuster(env, stamp) {
+    try {
+      const res = await fetch(iconFontUrl(env, stamp), { method: "HEAD", cache: "no-store" });
+      const lastModified = res.headers.get("last-modified");
+      const at = lastModified ? Date.parse(lastModified) : NaN;
+      if (!Number.isNaN(at)) return String(at);
+    } catch {
+    }
+    return String(stamp);
+  }
+  async function loadFonts(stamp) {
     await Promise.all(
       ICON_ENVS.map(async (env) => {
-        const res = await fetch(iconCssUrl(env), { cache: hard ? "reload" : "no-cache" });
+        const family = fontFamilyOf(env.id);
+        const buster = await fontBuster(env, stamp);
+        const key = `${family}:${buster}`;
+        if (fontsLoaded.has(key)) return;
+        try {
+          const face = new FontFace(family, `url(${iconFontUrl(env, buster)}) format("woff")`, { display: "block" });
+          await face.load();
+          document.fonts.add(face);
+          fontsLoaded.add(key);
+        } catch (error) {
+          console.warn(`[Dev Inspectors] could not load the ${env.id} icon font:`, error);
+        }
+      })
+    );
+    renderIcons();
+  }
+  async function fetchIconSets() {
+    const perEnv = {};
+    const modified = {};
+    const stamp = Date.now();
+    void loadFonts(stamp);
+    await Promise.all(
+      ICON_ENVS.map(async (env) => {
+        const res = await fetch(iconCssUrl(env, stamp), { cache: "no-store" });
         if (!res.ok) throw new Error(`${env.id}: HTTP ${res.status}`);
         perEnv[env.id] = parseIconCss(await res.text());
         const lastModified = res.headers.get("last-modified");
@@ -2601,7 +2633,12 @@
       const has = icon.envs.includes(env.id);
       return `<span class="dot ${has ? "has" : "no"}" title="${env.label}${has ? "" : " \u2014 missing"}">${env.label}</span>`;
     }).join("");
-    return `<button class="icard${marks(icon)}" type="button" data-use="${cls}"><span class="top"><span class="glyph">${glyphOf(icon, "uat")}</span><span class="nm" title="${cls}">${escapeHtml(icon.short)}</span>${isFresh(icon) ? '<span class="newtag">NEW</span>' : ""}</span><span class="foot"><span class="code">${codeLabelOf(icon)}</span><span class="dots">${dots}</span></span></button>`;
+    return `<button class="icard${marks(icon)}" type="button" data-use="${cls}"><span class="top">${glyphHtml(icon)}<span class="nm" title="${cls}">${escapeHtml(icon.short)}</span>${isFresh(icon) ? '<span class="newtag">NEW</span>' : ""}</span><span class="foot"><span class="code">${codeLabelOf(icon)}</span><span class="dots">${dots}</span></span></button>`;
+  }
+  function glyphHtml(icon) {
+    const source = glyphSourceOf(icon);
+    if (!source) return '<span class="glyph"></span>';
+    return `<span class="glyph" style="font-family:'${fontFamilyOf(source.env)}'">${source.char}</span>`;
   }
   function marks(icon) {
     return `${isPartial(icon) ? " partial" : ""}${isFresh(icon) ? " fresh" : ""}`;
@@ -2611,7 +2648,7 @@
     const missing = ICON_ENVS.filter((env) => !icon.envs.includes(env.id)).map((env) => env.label);
     const notes = [isFresh(icon) ? "new" : "", missing.length ? `missing on ${missing.join(", ")}` : ""].filter(Boolean);
     const title = notes.length ? `${cls} \u2014 ${notes.join(", ")}` : cls;
-    return `<button class="itile${marks(icon)}" type="button" data-use="${cls}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"><span class="glyph">${glyphOf(icon, "uat")}</span></button>`;
+    return `<button class="itile${marks(icon)}" type="button" data-use="${cls}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${glyphHtml(icon)}</button>`;
   }
   async function loadIcons(hard = false) {
     if (iconsLoaded && !hard) return;
@@ -2626,7 +2663,7 @@
     }
     $refresh.classList.add("is-busy");
     try {
-      const { perEnv, modified } = await fetchIconSets(hard);
+      const { perEnv, modified } = await fetchIconSets();
       const snapshot = { fetchedAt: Date.now(), perEnv, modified };
       writeIconCache(snapshot);
       icons = mergeByName(perEnv);

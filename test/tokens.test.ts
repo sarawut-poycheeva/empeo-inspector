@@ -34,10 +34,14 @@ test("a text-ramp hex resolves to its utility class first", () => {
 	);
 });
 
-test("a hex that is off by one digit still finds the brand colour", () => {
+test("a hex that is off by one digit ranks near the brand colour, and is not an answer", () => {
 	const hits = findByHex(TOKENS, "#F05B30", "empeo");
 
-	assert.equal(hits.filter((h) => h.distance === 0).length, 0, "nothing matches exactly");
+	// The matcher still measures distance — the shadow lens and the token list use
+	// the ordering — but the colours lens shows exact hits only. A near miss
+	// rendered in the answer card reads as "use this", and a developer acting on
+	// it writes a token that is not the colour they were handed.
+	assert.equal(hits.filter((h) => h.distance === 0).length, 0, "nothing matches exactly, so nothing is shown");
 	assert.equal(hits[0].row.key, "color-primary");
 	assert.ok(hits[0].distance > 0 && hits[0].distance < 5, `expected a tiny delta, got ${hits[0].distance}`);
 });

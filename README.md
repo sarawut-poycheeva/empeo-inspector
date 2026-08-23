@@ -33,7 +33,7 @@ Then in Chrome: **Extensions → Developer mode → Load unpacked → pick the `
 
 | | |
 |---|---|
-| Paste a hex | ranked matches, exact first; if nothing is exact it shows the nearest with a `Δ` |
+| Paste a hex | exact matches only — if the colour is not in the system, it says so |
 | Paste a `box-shadow` | matched against the three DS shadows |
 | Type a name | `text-color-8`, `primary`, `--go5-bg-secondary`, `.go5-color-primary` |
 | **Pick a colour** | eyedropper — grabs any pixel on screen, including outside the browser |
@@ -44,11 +44,20 @@ Then in Chrome: **Extensions → Developer mode → Load unpacked → pick the `
 Switching brand re-tints the popup with that brand's primary, so it is obvious which theme
 the values belong to.
 
-### Why "nearest" and not just exact
+### Why exact only, for a hex
 
-Colours lifted from a design file are routinely a digit or two off. `#F05B30` is not in the
-system, but it is 2 away from `--go5-color-primary`, which is almost certainly what was meant.
-Exact-only matching fails on the common case.
+An earlier build answered with the nearest token when nothing matched exactly, reasoning that
+colours lifted from a design file are routinely a digit or two off — `#F05B30` is 2 away from
+`--go5-color-primary`, which is almost certainly what was meant.
+
+The reasoning was right and the behaviour was still wrong. A near hit renders in the same card as
+a real answer, so it reads as *use this*; acting on it means shipping a token that is not the
+colour you were handed, with the tool's blessing. "Not in the system" sends you to ask the
+designer, which is the correct next step when a colour genuinely is not there.
+
+Shadows still report a closest match, because a shadow is five numbers and being told which DS
+shadow is nearest is the actual question — but it is labelled `closest`, never presented as the
+answer.
 
 ### The eyedropper
 

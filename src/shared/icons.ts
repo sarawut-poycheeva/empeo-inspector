@@ -32,12 +32,27 @@ const FONT_PATH = "assets/icons/go5-icon/fonts/gofive.woff";
 export const ICON_PREFIX = "gf-icon-";
 export const ICON_FONT_FAMILY = "gofive";
 
-export function iconCssUrl(env: IconEnv): string {
-	return env.base + CSS_PATH;
+/**
+ * The stylesheet, with a cache buster — which is not optional.
+ *
+ * `cache: "no-cache"` only bypasses the *browser* cache. The file is served
+ * `cache-control: public, max-age=31536000, immutable` from behind Cloudflare,
+ * so the edge answers a bare URL out of its own copy: measured `cf-cache-status:
+ * HIT` with `age: 337162` — **3.9 days stale**, reporting 1203 icons on dev when
+ * the origin had 1205. The lens looked like it was refusing to see a deployment;
+ * it was being told the wrong thing by a machine in between.
+ *
+ * A unique query is a distinct cache key, which is exactly what the app does
+ * when it loads this same file (`style.css?v=<version>`) — and the reason the
+ * page showed a new icon while this did not.
+ */
+export function iconCssUrl(env: IconEnv, buster: string | number = Date.now()): string {
+	return `${env.base}${CSS_PATH}?v=${buster}`;
 }
 
-export function iconFontUrl(env: IconEnv): string {
-	return env.base + FONT_PATH;
+/** Same buster, same reason — and the font goes stale in the *browser* cache too. */
+export function iconFontUrl(env: IconEnv, buster: string | number = Date.now()): string {
+	return `${env.base}${FONT_PATH}?v=${buster}`;
 }
 
 export interface ParsedIcon {
@@ -111,6 +126,31 @@ export function classOf(icon: Icon): string {
 export function glyphOf(icon: Icon, fontEnv: string): string {
 	const code = icon.codes[fontEnv] ?? Object.values(icon.codes)[0];
 	return code ? String.fromCodePoint(parseInt(code, 16)) : "";
+}
+
+/**
+ * The codepoint AND the font it has to be drawn with.
+ *
+ * These cannot be chosen separately. Codepoints drift between environments —
+ * `empeo-magic-wand` is `eab9` on one and `eab7` on another — so rendering one
+ * environment's slot number with another environment's font file draws whatever
+ * happens to sit at that slot: a person instead of a wand. The glyph is the whole
+ * payload of this lens, so a wrong one is worse than none.
+ *
+ * Preference order is dev → uat → prod, because a just-added icon exists there
+ * first and that is the case people are looking at.
+ */
+export function glyphSourceOf(icon: Icon): { env: string; char: string } | null {
+	for (const env of ICON_ENVS) {
+		const code = icon.codes[env.id];
+		if (code) return { env: env.id, char: String.fromCodePoint(parseInt(code, 16)) };
+	}
+	return null;
+}
+
+/** The family name registered per environment, so a card can pick the right one. */
+export function fontFamilyOf(envId: string): string {
+	return `${ICON_FONT_FAMILY}-${envId}`;
 }
 
 /** Shows one codepoint when every environment agrees, otherwise all of them. */

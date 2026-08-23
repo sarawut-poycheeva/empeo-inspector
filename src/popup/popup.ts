@@ -1,15 +1,18 @@
 import {
 	classOf,
 	codeLabelOf,
-	glyphOf,
+	fontFamilyOf,
+	glyphSourceOf,
 	ICON_ENVS,
 	iconCssUrl,
+	iconFontUrl,
 	isPartial,
 	mergeByName,
 	newSince,
 	parseIconCss,
 	searchIcons,
 	type Icon,
+	type IconEnv,
 	type ParsedIcon,
 } from "../shared/icons.ts";
 import {
@@ -264,36 +267,35 @@ function renderAnswer(): void {
 	bindCopy($ans);
 }
 
+/**
+ * Exact or nothing.
+ *
+ * Nearest-match used to answer here, on the reasoning that colours lifted from a
+ * design file are often a digit or two off. The reasoning was fine and the
+ * behaviour was still wrong: the near hit is rendered in the same card as a real
+ * answer, so it reads as "use this" — and a developer who acts on it has just
+ * written a token that is not the colour they were given, with the tool's
+ * blessing. Being told nothing sends them to ask the designer, which is the
+ * correct next step when a colour is genuinely not in the system.
+ */
 function renderHex(hex: string): void {
-	const hits = findByHex(TOKENS, hex, brand);
-	const exact = hits.filter((h) => h.distance === 0).sort((a, b) => tokenRank(a.row) - tokenRank(b.row));
-	const near = hits.filter((h) => h.distance > 0);
+	const exact = findByHex(TOKENS, hex, brand)
+		.filter((hit) => hit.distance === 0)
+		.sort((a, b) => tokenRank(a.row) - tokenRank(b.row));
 
-	if (exact.length) {
-		$ansLabel.textContent = `Exact match · ${hex}`;
-		$ans.innerHTML =
-			answerCard(exact[0].row, hex, 0) +
-			expander(
-				`${exact.length - 1} more tokens share this color`,
-				exact.slice(1, 10).map((h) => altRow(h.row, 0)),
-			);
+	if (!exact.length) {
+		$ansLabel.textContent = "Result";
+		$ans.innerHTML = NO_RESULT;
 		return;
 	}
 
-	if (near.length) {
-		$ansLabel.textContent = `No exact match · ${hex}`;
-		$ans.innerHTML =
-			answerCard(near[0].row, hex, near[0].distance) +
-			expander(
-				"Other close matches",
-				near.slice(1, 5).map((h) => altRow(h.row, h.distance)),
-				true,
-			);
-		return;
-	}
-
-	$ansLabel.textContent = "Result";
-	$ans.innerHTML = NO_RESULT;
+	$ansLabel.textContent = `Exact match · ${hex}`;
+	$ans.innerHTML =
+		answerCard(exact[0].row, hex, 0) +
+		expander(
+			`${exact.length - 1} more tokens share this color`,
+			exact.slice(1, 10).map((h) => altRow(h.row, 0)),
+		);
 }
 
 function renderShadow(value: string): void {
@@ -560,28 +562,99 @@ function writeIconCache(snapshot: IconSnapshot): void {
 }
 
 /**
- * The stylesheet is served `cache-control: max-age=31536000, immutable`, so a
- * default fetch is answered from cache without ever contacting the server — for
- * a year. For a lens whose whole job is "has this shipped yet" that guarantees a
- * wrong answer, which is exactly why the app itself appends `?v=<timestamp>`.
+ * There are two caches in front of this file and only one of them answers to
+ * `fetch` options.
  *
- * `no-cache` forces revalidation, so the ETag still saves the body on a 304 but
- * the answer is never stale. `reload` skips the cache entirely, for the refresh
- * button when you do not trust what you are looking at.
+ * The browser's is handled by the request options. Cloudflare's is not: the file
+ * is `immutable` with a one-year max-age, so the edge serves its own copy of a
+ * bare URL no matter what the client asks for. Measured on dev — `cf-cache-status:
+ * HIT`, `age: 337162`, four days behind the origin. Only a distinct URL gets past
+ * it, which is why `iconCssUrl` carries a buster and why the app does the same
+ * when it loads this file.
  *
  * `Last-Modified` is CORS-safelisted, so it can be read cross-origin and tells
- * you when each environment last deployed the set.
+ * you when each environment last deployed the set. Note it reflects the object
+ * that answered, so it is only trustworthy once the buster is in place.
  */
-async function fetchIconSets(hard = false): Promise<{
+/**
+ * One font per environment, registered at runtime rather than in the stylesheet.
+ *
+ * A static `@font-face` cannot carry a cache buster, and the woff is `immutable`
+ * with a one-year max-age, so the browser keeps whichever copy it downloaded
+ * first — for a year. That is how the stylesheet came back fresh while the glyphs
+ * stayed old: `empeo-magic-wand` moved to slot `eab9`, and slot `eab9` in the
+ * cached font was a person.
+ *
+ * Three families rather than one, because the slot numbers differ per
+ * environment; a card has to draw its glyph with the font that agrees with the
+ * codepoint it used.
+ */
+const fontsLoaded = new Set<string>();
+
+/**
+ * The font's buster is its own `Last-Modified`, not the clock.
+ *
+ * A timestamp would be correct and expensive: the woff is 520 KB per
+ * environment, so every open would pull 1.5 MB that is almost always identical
+ * to what the browser already holds. Keying on the deploy time instead gives a
+ * URL that is stable while the set is unchanged — cached like any other asset —
+ * and different the moment anything ships, which is exactly when the glyph table
+ * must be re-read.
+ *
+ * The HEAD that learns it still needs a clock buster of its own, or the edge
+ * would answer that from cache too and we would be back where we started. It
+ * carries no body, so the cost is a few hundred bytes.
+ */
+async function fontBuster(env: IconEnv, stamp: number): Promise<string> {
+	try {
+		const res = await fetch(iconFontUrl(env, stamp), { method: "HEAD", cache: "no-store" });
+		const lastModified = res.headers.get("last-modified");
+		const at = lastModified ? Date.parse(lastModified) : NaN;
+		if (!Number.isNaN(at)) return String(at);
+	} catch {
+		// unreachable, or a header we cannot read — fall back to always-fresh
+	}
+	return String(stamp);
+}
+
+async function loadFonts(stamp: number): Promise<void> {
+	await Promise.all(
+		ICON_ENVS.map(async (env) => {
+			const family = fontFamilyOf(env.id);
+			const buster = await fontBuster(env, stamp);
+			const key = `${family}:${buster}`;
+			if (fontsLoaded.has(key)) return;
+
+			try {
+				const face = new FontFace(family, `url(${iconFontUrl(env, buster)}) format("woff")`, { display: "block" });
+				await face.load();
+				document.fonts.add(face);
+				fontsLoaded.add(key);
+			} catch (error) {
+				// One environment being unreachable must not blank the other two.
+				console.warn(`[Dev Inspectors] could not load the ${env.id} icon font:`, error);
+			}
+		}),
+	);
+
+	renderIcons();
+}
+
+async function fetchIconSets(): Promise<{
 	perEnv: Record<string, ParsedIcon[]>;
 	modified: Record<string, string>;
 }> {
 	const perEnv: Record<string, ParsedIcon[]> = {};
 	const modified: Record<string, string> = {};
+	const stamp = Date.now(); // one per sweep, so the three environments compare like for like
+
+	void loadFonts(stamp);
 
 	await Promise.all(
 		ICON_ENVS.map(async (env) => {
-			const res = await fetch(iconCssUrl(env), { cache: hard ? "reload" : "no-cache" });
+			// The buster is what actually defeats the CDN; `no-store` keeps the browser
+			// from filling its own cache with URLs that will never be requested again.
+			const res = await fetch(iconCssUrl(env, stamp), { cache: "no-store" });
 			if (!res.ok) throw new Error(`${env.id}: HTTP ${res.status}`);
 			perEnv[env.id] = parseIconCss(await res.text());
 			const lastModified = res.headers.get("last-modified");
@@ -705,12 +778,26 @@ function cardHtml(icon: Icon): string {
 
 	return (
 		`<button class="icard${marks(icon)}" type="button" data-use="${cls}">` +
-		`<span class="top"><span class="glyph">${glyphOf(icon, "uat")}</span>` +
+		`<span class="top">${glyphHtml(icon)}` +
 		`<span class="nm" title="${cls}">${escapeHtml(icon.short)}</span>` +
 		`${isFresh(icon) ? '<span class="newtag">NEW</span>' : ""}</span>` +
 		`<span class="foot"><span class="code">${codeLabelOf(icon)}</span>` +
 		`<span class="dots">${dots}</span></span></button>`
 	);
+}
+
+/**
+ * Draws the glyph with the font of the environment its codepoint came from.
+ *
+ * Pinning every card to one font was the bug: slot numbers shift between
+ * environments, so `empeo-magic-wand`'s `eab9` drawn with a font that had a
+ * person at `eab9` showed a person, confidently and with the right name under it.
+ */
+function glyphHtml(icon: Icon): string {
+	const source = glyphSourceOf(icon);
+	if (!source) return '<span class="glyph"></span>';
+
+	return `<span class="glyph" style="font-family:'${fontFamilyOf(source.env)}'">${source.char}</span>`;
 }
 
 /** New and mismatched are independent — a just-added icon is usually both. */
@@ -732,7 +819,7 @@ function tileHtml(icon: Icon): string {
 	return (
 		`<button class="itile${marks(icon)}" type="button" data-use="${cls}" ` +
 		`title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">` +
-		`<span class="glyph">${glyphOf(icon, "uat")}</span></button>`
+		`${glyphHtml(icon)}</button>`
 	);
 }
 
@@ -753,7 +840,9 @@ async function loadIcons(hard = false): Promise<void> {
 	$refresh.classList.add("is-busy");
 
 	try {
-		const { perEnv, modified } = await fetchIconSets(hard);
+		// No hard/soft distinction any more: every fetch carries a fresh buster, so
+		// every fetch is already as authoritative as Sync used to be.
+		const { perEnv, modified } = await fetchIconSets();
 		const snapshot: IconSnapshot = { fetchedAt: Date.now(), perEnv, modified };
 		writeIconCache(snapshot);
 		icons = mergeByName(perEnv);
