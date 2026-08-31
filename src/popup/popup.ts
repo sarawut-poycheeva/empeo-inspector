@@ -194,7 +194,21 @@ function valuesRow(light: string | null, dark: string | null, matched: string | 
 	);
 }
 
-function answerCard(row: TokenRow, matched: string | null, distance: number): string {
+/**
+ * Says why a token whose stored value looks nothing like the input is
+ * nevertheless the right answer. Without it the card reads as a wrong hit: the
+ * value row shows `#F05B2F1A` under a heading that claims an exact match on
+ * `#322223`, which is the sort of thing that makes someone stop trusting the
+ * lens. The percentage is also the actionable half — it is what has to be
+ * written next to the token.
+ */
+function blendTag(blend: Hit["blend"]): string {
+	if (!blend) return "";
+	const text = `${Math.round(blend.alpha * 100)}% over ${blend.over}`;
+	return `<span class="tag blend" title="This token is translucent — what you picked is it composited on ${blend.over}">${escapeHtml(text)}</span>`;
+}
+
+function answerCard(row: TokenRow, matched: string | null, distance: number, blend?: Hit["blend"]): string {
 	const light = valueOf(row, brand, "light");
 	const dark = valueOf(row, brand, "dark");
 	const use = usageOf(row);
@@ -206,6 +220,7 @@ function answerCard(row: TokenRow, matched: string | null, distance: number): st
 		`<button class="copy" type="button" data-use="${escapeHtml(use)}">Copy</button></div>` +
 		'<div class="ans-meta">' +
 		typeTag(row) +
+		blendTag(blend) +
 		(distance > 0 ? `<span class="tag near">Δ ${Math.round(distance)}</span>` : "") +
 		(row.invalidHex ? '<span class="tag bad">invalid hex in DS</span>' : "") +
 		"</div>" +
@@ -214,7 +229,7 @@ function answerCard(row: TokenRow, matched: string | null, distance: number): st
 	);
 }
 
-function altRow(row: TokenRow, distance: number): string {
+function altRow(row: TokenRow, distance: number, blend?: Hit["blend"]): string {
 	const use = usageOf(row);
 	return (
 		`<button class="row" type="button" data-use="${escapeHtml(use)}">` +
@@ -222,6 +237,7 @@ function altRow(row: TokenRow, distance: number): string {
 		`<span class="cn${row.cls ? "" : " vo"}">${escapeHtml(use)}</span>` +
 		'<span class="meta">' +
 		(distance > 0 ? `<span class="hx">Δ ${Math.round(distance)}</span>` : "") +
+		(blend ? `<span class="hx">${Math.round(blend.alpha * 100)}%</span>` : "") +
 		typeTag(row) +
 		"</span></button>"
 	);
@@ -283,7 +299,10 @@ function renderAnswer(): void {
 function renderHex(hex: string): void {
 	const exact = findByHex(TOKENS, hex, brand)
 		.filter((hit) => hit.distance === 0)
-		.sort((a, b) => tokenRank(a.row) - tokenRank(b.row));
+		// An opaque token that simply *is* this colour outranks one that only
+		// becomes it at 16% over a surface — both are exact, but the first needs
+		// no reasoning about what it was sitting on.
+		.sort((a, b) => Number(!!a.blend) - Number(!!b.blend) || tokenRank(a.row) - tokenRank(b.row));
 
 	if (!exact.length) {
 		$ansLabel.textContent = "Result";
@@ -293,10 +312,10 @@ function renderHex(hex: string): void {
 
 	$ansLabel.textContent = `Exact match · ${hex}`;
 	$ans.innerHTML =
-		answerCard(exact[0].row, hex, 0) +
+		answerCard(exact[0].row, hex, 0, exact[0].blend) +
 		expander(
 			`${exact.length - 1} more tokens share this color`,
-			exact.slice(1, 10).map((h) => altRow(h.row, 0)),
+			exact.slice(1, 10).map((h) => altRow(h.row, 0, h.blend)),
 		);
 }
 

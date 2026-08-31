@@ -21,6 +21,7 @@
 	--danger: #b4232c;
 	--danger-bg: #fdf0f0;
 	--accent: #f05b2f;
+	--accent-bg: #fdeeea;
 	--checker: #e8e8ea;
 
 	--mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
@@ -41,6 +42,7 @@
 		--warn-bg: #2a2011;
 		--danger: #f08a8a;
 		--danger-bg: #2a1516;
+		--accent-bg: #32221c;
 		--checker: #2a2a2e;
 	}
 }
@@ -531,6 +533,13 @@ main::-webkit-scrollbar-button {
 .tag.bad {
 	color: var(--danger);
 	background: var(--danger-bg);
+}
+
+/* Not a warning — the match is exact. It carries the one fact the value row
+   cannot show: the token is translucent, and what was picked is it composited. */
+.tag.blend {
+	color: var(--accent);
+	background: var(--accent-bg);
 }
 
 /* ---------- rows ---------- */

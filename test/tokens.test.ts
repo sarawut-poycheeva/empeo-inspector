@@ -3,15 +3,18 @@ import { test } from "node:test";
 
 import { TOKENS } from "../src/shared/tokens.generated.ts";
 import {
+	composite,
 	findByHex,
 	findByName,
 	findByShadow,
 	hasTheme,
 	looksLikeShadow,
 	normalizeHex,
+	parseRgba,
 	parseShadow,
 	shadowDistance,
 	usageOf,
+	valueOf,
 } from "../src/shared/tokens.ts";
 
 test("normalizeHex accepts the shapes people actually paste", () => {
@@ -44,6 +47,82 @@ test("a hex that is off by one digit ranks near the brand colour, and is not an 
 	assert.equal(hits.filter((h) => h.distance === 0).length, 0, "nothing matches exactly, so nothing is shown");
 	assert.equal(hits[0].row.key, "color-primary");
 	assert.ok(hits[0].distance > 0 && hits[0].distance < 5, `expected a tiny delta, got ${hits[0].distance}`);
+});
+
+test("parseRgba keeps the alpha of an 8-digit hex, which normalizeHex drops", () => {
+	// The two disagree on purpose: `#F05B2F1A` pasted by a person means the brand
+	// orange, but the same string as a token value is a 10% wash, and the whole
+	// difference between `color-primary` and `tag-default-bg` lives in that byte.
+	assert.equal(normalizeHex("#F05B2F1A"), "#F05B2F");
+	assert.deepEqual(parseRgba("#F05B2F1A"), { r: 240, g: 91, b: 47, a: 0x1a / 255 });
+	assert.deepEqual(parseRgba("#F05B2F"), { r: 240, g: 91, b: 47, a: 1 });
+});
+
+test("composite reproduces what the browser paints", () => {
+	// The real token alpha, `0x1A/255 = 0.1019…`, not a rounded 0.1 — at 0.1 the
+	// red channel lands on 253.5 and the answer changes with the rounding rule.
+	assert.equal(composite({ r: 240, g: 91, b: 47, a: 0x1a / 255 }, "#FFFFFF"), "#FDEEEA");
+	assert.equal(composite({ r: 0, g: 0, b: 0, a: 0.16 }, "#FFFFFF"), "#D6D6D6");
+	assert.equal(composite({ r: 1, g: 2, b: 3, a: 0 }, "#FFFFFF"), "#FFFFFF", "fully transparent is the surface");
+	assert.equal(composite({ r: 1, g: 2, b: 3, a: 1 }, "#FFFFFF"), "#010203", "fully opaque ignores the surface");
+	assert.equal(composite({ r: 0, g: 0, b: 0, a: 0.5 }, "not a colour"), null);
+});
+
+test("an eyedropper reading of a translucent token resolves to that token", () => {
+	// The reported symptom: pick the colour off a screen and the lens finds
+	// nothing, because it was comparing the stored `#F05B2F1A` against the pixel.
+	const tag = TOKENS.rows.find((r) => r.key === "tag-default-bg");
+	assert.equal(valueOf(tag!, "empeo", "dark"), "#F05B2F1A", "the premise of this test");
+
+	const picked = composite(parseRgba("#F05B2F1A")!, "#1C1C22"); // empeo-dark bg-primary
+	assert.equal(picked, "#322223");
+
+	const hit = findByHex(TOKENS, picked!, "empeo").find((h) => h.row.key === "tag-default-bg");
+	assert.ok(hit, "the picked pixel must reach the token it came from");
+	assert.equal(hit.distance, 0, "and as an exact match, not a near one");
+	assert.equal(hit.blend?.over, "#1C1C22");
+	assert.equal(Math.round((hit.blend?.alpha ?? 0) * 100), 10);
+});
+
+test("rgba() and rgb(… / %) token values are reachable by hex", () => {
+	// 24 token values are authored in these shapes. Every one of them was
+	// invisible to a hex search, because the matcher ran them through a hex-only
+	// parser and skipped whatever came back null.
+	const hover = findByHex(TOKENS, "#D6D6D6", "empeo").find((h) => h.row.key === "card-hover");
+	assert.ok(hover && hover.distance === 0, "rgba(0, 0, 0, 0.16) over white");
+	assert.equal(hover.blend?.over, "#FFFFFF");
+
+	const nav = TOKENS.rows.find((r) => r.key === "nav-bg-icon-active");
+	assert.equal(valueOf(nav!, "empeo", "light"), "rgb(255 255 255 / 30%)", "the space-separated form with a percent");
+	assert.deepEqual(parseRgba(valueOf(nav!, "empeo", "light")), { r: 255, g: 255, b: 255, a: 0.3 });
+});
+
+test("a relative colour resolves through the variable it is derived from", () => {
+	// `rgba(from var(--go5-text-color-2) r g b / 0.6)` — one token uses it today,
+	// and an unparsed value is silently unfindable rather than visibly broken.
+	const row = TOKENS.rows.find((r) => r.key === "button-outline-hover-bg");
+	assert.match(valueOf(row!, "venio", "dark") ?? "", /^rgba\(from var\(/, "the premise of this test");
+
+	// text-color-2 on venio-dark is #383842, at 60% over the #1C1C22 page.
+	const hit = findByHex(TOKENS, "#2D2D35", "venio").find((h) => h.row.key === "button-outline-hover-bg");
+	assert.ok(hit && hit.distance === 0);
+	assert.equal(Math.round((hit.blend?.alpha ?? 0) * 100), 60);
+});
+
+test("an opaque token outranks a blended one at the same colour", () => {
+	// Both are exact, but only one of them needs the reader to reason about what
+	// it was sitting on, so `renderHex` puts the plain answer first.
+	const hits = findByHex(TOKENS, "#FFFFFF", "empeo").filter((h) => h.distance === 0);
+	assert.ok(hits.length > 1);
+	assert.equal(hits.some((h) => !h.blend), true, "at least one plain white token");
+});
+
+test("transparent is not a colour and must not match anything", () => {
+	const text = TOKENS.rows.find((r) => r.key === "button-text-default-bg");
+	assert.equal(valueOf(text!, "empeo", "light"), "transparent");
+
+	const hit = findByHex(TOKENS, "#FFFFFF", "empeo").find((h) => h.row.key === "button-text-default-bg");
+	assert.ok(!hit || hit.distance > 0, "a transparent value must not resolve to the surface behind it");
 });
 
 test("brand colour differs between empeo and venio", () => {

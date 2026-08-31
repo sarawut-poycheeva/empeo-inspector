@@ -59,16 +59,50 @@ Shadows still report a closest match, because a shadow is five numbers and being
 shadow is nearest is the actual question — but it is labelled `closest`, never presented as the
 answer.
 
+### Translucent tokens are matched by what they render as
+
+Exact-only has one failure mode that is not the designer's fault and not yours: **a token with
+alpha never renders as its own value.** `tag-default-bg` is `#F05B2F1A`, but the pixel on an
+empeo-dark page is `#322223`. Comparing the stored value against a picked one puts those 100
+units apart — not a near miss the ranking could have rescued, just nothing at all. It read as the
+lens being broken, and for that quarter of the set it was.
+
+So a translucent token is compared as what it composites to over the page surfaces (`bg-primary`
+and `bg-secondary`, per theme), and the hit is tagged `10% over #1C1C22` — the alpha is the half
+you have to write down anyway. Still an exact match, still nothing invented.
+
+Only those two surfaces. Compositing over every opaque token in the set would produce a hit for
+almost any input, and the whole value of exact-only is that *not* finding something means
+something.
+
+`rgba()`, `rgb(r g b / n%)` and `rgba(from var(--x) r g b / n)` are parsed too — hex-only parsing
+had been skipping them in silence, which is worse than failing, because nothing said those tokens
+existed. Of 846 values the lens can now reach 763, up from 734. What is left is honest: 56
+`transparent`, 6 gradients, and the 21 malformed hexes DS ships (see below), which CSS drops
+anyway.
+
 ### The eyedropper
 
 The eyedropper reads **one composited pixel**. It has no idea which element the pixel came
 from, so it can answer *which token is this colour* and nothing else — not the shadow, not the
-class, not the font. Two things to keep in mind:
+class, not the font.
 
-- The value is what is on screen **after blending**. Opacity, an overlapping shadow or a
-  translucent overlay all pull it away from the authored colour.
-- Text is anti-aliased, so the edge of a glyph is a blend with whatever sits behind it. Aim at
-  the middle of a thick stroke, or expect a near miss rather than an exact one.
+What pulls a reading away from the authored colour, in the order it actually bites:
+
+- **Alpha.** Handled now, per the section above — but only for a token's own alpha. A parent
+  `opacity`, a hover state or a scrim stacks on top of that and is not modelled.
+- **Picking from a screenshot on a wide-gamut display.** macOS tags the file with the display
+  profile, so the value you read is the P3 rendering of an sRGB colour: off by 1–4 per channel,
+  consistently, for every colour on the page. Pick the same swatch live and from a screenshot; if
+  they disagree, this is why.
+- **An image that went through Slack or Line.** Re-encoded as JPEG, and chroma subsampling moves
+  colours near any edge.
+- **Anti-aliasing.** The edge of a glyph, a 1px border or a rounded corner is a blend with
+  whatever is behind it. Aim at the middle of a thick stroke.
+- **Zoom that is not 100%, or a fractional device pixel ratio.** The browser interpolates, and
+  interpolated pixels are averages of two colours.
+- **Gradients and shadows.** Real, and the smallest of these — a gradient has no single colour to
+  match, so `nav-background` cannot be found by picking off the nav bar.
 
 Its real advantage is reach: it picks from anywhere on screen, a design tool or an image
 included, which nothing else here can do.

@@ -2109,7 +2109,34 @@
       return { r: +m[1], g: +m[2], b: +m[3], a };
     }
     const rgb = toRgb(input);
-    return rgb ? { r: rgb[0], g: rgb[1], b: rgb[2], a: 1 } : null;
+    if (!rgb) return null;
+    const eight = String(input).trim().match(/^#?[0-9a-f]{6}([0-9a-f]{2})$/i);
+    return { r: rgb[0], g: rgb[1], b: rgb[2], a: eight ? parseInt(eight[1], 16) / 255 : 1 };
+  }
+  function clampByte(value) {
+    return Math.min(255, Math.max(0, Math.round(value)));
+  }
+  function toHex(r, g, b) {
+    return `#${[r, g, b].map((c) => clampByte(c).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+  }
+  function composite(fore, over) {
+    const back = toRgb(over);
+    if (!back) return null;
+    const a = Math.min(1, Math.max(0, fore.a));
+    return toHex(
+      fore.r * a + back[0] * (1 - a),
+      fore.g * a + back[1] * (1 - a),
+      fore.b * a + back[2] * (1 - a)
+    );
+  }
+  function resolveRelative(table, value, brand2, mode2) {
+    const m = value.match(/rgba?\(\s*from\s+var\(\s*(--[\w-]+)\s*\)\s+r\s+g\s+b\s*\/\s*([\d.%]+)\s*\)/i);
+    if (!m) return null;
+    const source = table.rows.find((row) => row.cssVar === m[1]);
+    const base = source && toRgb(valueOf(source, brand2, mode2) ?? "");
+    if (!base) return null;
+    const alpha = m[2].includes("%") ? parseFloat(m[2]) / 100 : parseFloat(m[2]);
+    return `rgba(${base[0]}, ${base[1]}, ${base[2]}, ${alpha})`;
   }
   function parseShadow(input) {
     if (!input) return null;
@@ -2184,18 +2211,41 @@
       return (ia < 0 ? 9 : ia) - (ib < 0 ? 9 : ib) || a.localeCompare(b);
     });
   }
+  function surfacesOf(table, brand2, mode2) {
+    const seen = [];
+    for (const key of ["bg-primary", "bg-secondary"]) {
+      const row = table.rows.find((r) => r.key === key);
+      const hex = row && normalizeHex(valueOf(row, brand2, mode2));
+      if (hex && !seen.includes(hex)) seen.push(hex);
+    }
+    return seen;
+  }
   function findByHex(table, hex, brand2) {
     const target = normalizeHex(hex);
     if (!target) return [];
+    const modes = ["light", "dark"];
+    const surfaces = new Map(modes.map((mode2) => [mode2, surfacesOf(table, brand2, mode2)]));
     const best = /* @__PURE__ */ new Map();
+    const consider = (row, value, blend) => {
+      const distance = colorDistance(target, value);
+      const current = best.get(row.key);
+      if (!current || distance < current.distance) best.set(row.key, { row, distance, blend });
+    };
     for (const row of table.rows) {
       if (row.group === "shadow") continue;
-      for (const mode2 of ["light", "dark"]) {
-        const value = normalizeHex(valueOf(row, brand2, mode2));
-        if (!value) continue;
-        const distance = colorDistance(target, value);
-        const current = best.get(row.key);
-        if (!current || distance < current.distance) best.set(row.key, { row, distance });
+      for (const mode2 of modes) {
+        const raw = valueOf(row, brand2, mode2);
+        if (!raw) continue;
+        const color = parseRgba(resolveRelative(table, raw, brand2, mode2) ?? raw);
+        if (!color) continue;
+        if (color.a >= 1) {
+          consider(row, toHex(color.r, color.g, color.b));
+          continue;
+        }
+        for (const surface of surfaces.get(mode2) ?? []) {
+          const blended = composite(color, surface);
+          if (blended) consider(row, blended, { over: surface, alpha: color.a });
+        }
       }
     }
     return [...best.values()].sort(
@@ -2324,15 +2374,20 @@
     const longest = Math.max((light ?? "").length, (dark ?? "").length);
     return `<div class="ans-vals${longest > 14 ? " stack" : ""}"><span class="lv"><b>LIGHT</b>${swatch(light)}<span class="${hitLight ? "hit" : ""}">${light ?? "\u2014"}</span></span><span class="lv"><b>DARK</b>${swatch(dark)}<span class="${hitDark ? "hit" : ""}">${dark ?? "\u2014"}</span></span></div>`;
   }
-  function answerCard(row, matched, distance) {
+  function blendTag(blend) {
+    if (!blend) return "";
+    const text = `${Math.round(blend.alpha * 100)}% over ${blend.over}`;
+    return `<span class="tag blend" title="This token is translucent \u2014 what you picked is it composited on ${blend.over}">${escapeHtml(text)}</span>`;
+  }
+  function answerCard(row, matched, distance, blend) {
     const light = valueOf(row, brand, "light");
     const dark = valueOf(row, brand, "dark");
     const use = usageOf(row);
-    return `<div class="ans"><div class="ans-top">${swatch(matched ?? light, true)}<span class="cn">${escapeHtml(use)}</span><button class="copy" type="button" data-use="${escapeHtml(use)}">Copy</button></div><div class="ans-meta">` + typeTag(row) + (distance > 0 ? `<span class="tag near">\u0394 ${Math.round(distance)}</span>` : "") + (row.invalidHex ? '<span class="tag bad">invalid hex in DS</span>' : "") + "</div>" + valuesRow(light, dark, matched) + "</div>";
+    return `<div class="ans"><div class="ans-top">${swatch(matched ?? light, true)}<span class="cn">${escapeHtml(use)}</span><button class="copy" type="button" data-use="${escapeHtml(use)}">Copy</button></div><div class="ans-meta">` + typeTag(row) + blendTag(blend) + (distance > 0 ? `<span class="tag near">\u0394 ${Math.round(distance)}</span>` : "") + (row.invalidHex ? '<span class="tag bad">invalid hex in DS</span>' : "") + "</div>" + valuesRow(light, dark, matched) + "</div>";
   }
-  function altRow(row, distance) {
+  function altRow(row, distance, blend) {
     const use = usageOf(row);
-    return `<button class="row" type="button" data-use="${escapeHtml(use)}">` + swatch(valueOf(row, brand, mode) ?? valueOf(row, brand, "light")) + `<span class="cn${row.cls ? "" : " vo"}">${escapeHtml(use)}</span><span class="meta">` + (distance > 0 ? `<span class="hx">\u0394 ${Math.round(distance)}</span>` : "") + typeTag(row) + "</span></button>";
+    return `<button class="row" type="button" data-use="${escapeHtml(use)}">` + swatch(valueOf(row, brand, mode) ?? valueOf(row, brand, "light")) + `<span class="cn${row.cls ? "" : " vo"}">${escapeHtml(use)}</span><span class="meta">` + (distance > 0 ? `<span class="hx">\u0394 ${Math.round(distance)}</span>` : "") + (blend ? `<span class="hx">${Math.round(blend.alpha * 100)}%</span>` : "") + typeTag(row) + "</span></button>";
   }
   function expander(label, rows, open = false) {
     if (!rows.length) return "";
@@ -2363,16 +2418,16 @@
     bindCopy($ans);
   }
   function renderHex(hex) {
-    const exact = findByHex(TOKENS, hex, brand).filter((hit) => hit.distance === 0).sort((a, b) => tokenRank(a.row) - tokenRank(b.row));
+    const exact = findByHex(TOKENS, hex, brand).filter((hit) => hit.distance === 0).sort((a, b) => Number(!!a.blend) - Number(!!b.blend) || tokenRank(a.row) - tokenRank(b.row));
     if (!exact.length) {
       $ansLabel.textContent = "Result";
       $ans.innerHTML = NO_RESULT;
       return;
     }
     $ansLabel.textContent = `Exact match \xB7 ${hex}`;
-    $ans.innerHTML = answerCard(exact[0].row, hex, 0) + expander(
+    $ans.innerHTML = answerCard(exact[0].row, hex, 0, exact[0].blend) + expander(
       `${exact.length - 1} more tokens share this color`,
-      exact.slice(1, 10).map((h) => altRow(h.row, 0))
+      exact.slice(1, 10).map((h) => altRow(h.row, 0, h.blend))
     );
   }
   function renderShadow(value) {
