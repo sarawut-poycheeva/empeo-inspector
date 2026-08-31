@@ -8,11 +8,13 @@ import {
 	iconFontUrl,
 	isPartial,
 	mergeByName,
-	newSince,
 	parseIconCss,
+	recordSync,
 	searchIcons,
+	unseenAdditions,
 	type Icon,
 	type IconEnv,
+	type IconHistory,
 	type ParsedIcon,
 } from "../shared/icons.ts";
 import {
@@ -458,61 +460,70 @@ interface IconSnapshot {
 }
 
 const ICON_VIEW_KEY = "ds-icons:view";
-const ICON_BASELINE_KEY = "ds-icons:baseline:v1";
+const ICON_ROUNDS_KEY = "ds-icons:rounds:v1";
 
 /**
- * What the set looked like the last time the user said they had seen it.
- *
- * Diffing against the *previous fetch* would be useless: two opens an hour apart
- * would clear the flag whether or not anyone looked at it, so a new icon would
- * only ever be visible to whoever happened to sync in that window. Anchoring to
- * an explicit "seen" instead means an addition stays flagged until someone
- * actually acknowledges it.
+ * The predecessor keyed the whole diff on the last acknowledgement, so it
+ * answered "what changed since you last clicked ✓" — a span that grows with
+ * every release nobody dismissed. Dropped rather than migrated: carrying it
+ * over would show its accumulated backlog once as a single round, which is the
+ * exact reading being fixed.
  */
-interface IconBaseline {
-	at: number;
-	names: string[];
-}
+const ICON_BASELINE_KEY_V1 = "ds-icons:baseline:v1";
 
 let icons: Icon[] = [];
 let iconFilter: "all" | "new" | "partial" = "all";
 let iconView: IconView = readIconView();
 let iconsLoaded = false;
-let baseline: IconBaseline | null = readBaseline();
-/** Names present now but not in the baseline. Empty until the first diff. */
+let history: IconHistory | null = readHistory();
+/** What the most recent change added, unless it has been acknowledged. */
 let freshNames = new Set<string>();
 
-function readBaseline(): IconBaseline | null {
+function readHistory(): IconHistory | null {
 	try {
-		const raw = localStorage.getItem(ICON_BASELINE_KEY);
-		return raw ? (JSON.parse(raw) as IconBaseline) : null;
+		localStorage.removeItem(ICON_BASELINE_KEY_V1);
+		const raw = localStorage.getItem(ICON_ROUNDS_KEY);
+		return raw ? (JSON.parse(raw) as IconHistory) : null;
 	} catch {
 		return null;
 	}
 }
 
-function writeBaseline(names: string[]): void {
-	baseline = { at: Date.now(), names };
+function writeHistory(next: IconHistory): void {
+	history = next;
 	try {
-		localStorage.setItem(ICON_BASELINE_KEY, JSON.stringify(baseline));
+		localStorage.setItem(ICON_ROUNDS_KEY, JSON.stringify(next));
 	} catch {
 		// nothing to do; the diff just restarts from the next successful sync
 	}
 }
 
 /**
- * The first run has nothing to compare against, so it adopts the current set as
- * the baseline rather than announcing 1,204 new icons.
+ * Folds a completed sync into the history. Only ever called with a set that
+ * came off the network — replaying the cache through it would compare a set
+ * against itself and, on a first run, adopt an anchor that may already be days
+ * stale.
  */
-function diffAgainstBaseline(): void {
-	const names = icons.map((icon) => icon.short);
+function observeSync(): string[] {
+	const { history: next, added } = recordSync(
+		history,
+		icons.map((icon) => icon.short),
+		Date.now(),
+	);
 
-	if (baseline) {
-		freshNames = new Set(newSince(names, baseline.names));
-	} else {
-		writeBaseline(names);
-		freshNames = new Set();
-	}
+	writeHistory(next);
+	applyFresh();
+	return added;
+}
+
+/** Recomputes the flag from stored state. Safe on any paint, cached or not. */
+function applyFresh(): void {
+	freshNames = new Set(
+		unseenAdditions(
+			history,
+			icons.map((icon) => icon.short),
+		),
+	);
 
 	$icNew.disabled = freshNames.size === 0;
 	if (!freshNames.size && iconFilter === "new") iconFilter = "all";
@@ -522,8 +533,13 @@ function isFresh(icon: Icon): boolean {
 	return freshNames.has(icon.short);
 }
 
+/**
+ * Acknowledges the round rather than resetting the anchor. The anchor is the
+ * last thing synced and has nothing to do with what has been looked at; tying
+ * the two together is what made the count accumulate.
+ */
 function markAllSeen(): void {
-	writeBaseline(icons.map((icon) => icon.short));
+	if (history) writeHistory({ ...history, seenAt: Date.now() });
 	freshNames = new Set();
 	if (iconFilter === "new") setIconFilter("all");
 	else renderIconsPanel();
@@ -701,14 +717,16 @@ function partialFlag(): string {
 
 /**
  * Clickable, because the count is only half of it — "3 new" wants an answer to
- * "fine, I have looked", and that acknowledgement is what the whole baseline
- * hangs on.
+ * "fine, I have looked", and that acknowledgement is what dismisses the round.
  */
 function freshFlag(): string {
 	if (!freshNames.size) return "";
 
-	const since = baseline ? ` since ${shortDate(new Date(baseline.at).toUTCString())}` : "";
-	const title = `${freshNames.size} icon(s) added${since} — click to mark them all as seen`;
+	// The round's own timestamp, not the last sync's: it says which deploy these
+	// belong to, and that is the thing a count alone cannot tell you.
+	const at = history?.last?.at;
+	const when = at ? ` in the ${shortDate(new Date(at).toUTCString())} ${clockOf(at)} sync` : "";
+	const title = `${freshNames.size} icon(s) added${when} — click to mark them all as seen`;
 
 	return ` <button type="button" class="newchip" id="seen" title="${escapeHtml(title)}">${freshNames.size} New ✓</button>`;
 }
@@ -831,7 +849,7 @@ async function loadIcons(hard = false): Promise<void> {
 	const cached = readIconCache();
 	if (cached && !hard) {
 		icons = mergeByName(cached.perEnv);
-		diffAgainstBaseline();
+		applyFresh();
 		renderEnvLine(cached);
 		renderIcons();
 		$iconIdle.hidden = true;
@@ -846,11 +864,14 @@ async function loadIcons(hard = false): Promise<void> {
 		const snapshot: IconSnapshot = { fetchedAt: Date.now(), perEnv, modified };
 		writeIconCache(snapshot);
 		icons = mergeByName(perEnv);
-		diffAgainstBaseline();
+		const added = observeSync();
 		renderEnvLine(snapshot);
 		renderIcons();
 		$iconIdle.hidden = true;
-		if (hard) toast(freshNames.size ? `Synced · ${freshNames.size} new` : `Synced · ${icons.length} icons`);
+		// `added` is what THIS sync found, which is not the same as what is
+		// flagged: an earlier round stays flagged until it is acknowledged, and
+		// reporting that here would read as "this sync found them".
+		if (hard) toast(added.length ? `Synced · ${added.length} new` : `Synced · ${icons.length} icons`);
 	} catch (error) {
 		iconsLoaded = false; // let the next visit try again
 		if (!cached) {

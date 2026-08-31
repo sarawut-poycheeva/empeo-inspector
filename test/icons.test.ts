@@ -14,7 +14,10 @@ import {
 	mergeByName,
 	newSince,
 	parseIconCss,
+	recordSync,
 	searchIcons,
+	unseenAdditions,
+	type IconHistory,
 	type ParsedIcon,
 } from "../src/shared/icons.ts";
 
@@ -184,6 +187,81 @@ test("a codepoint shift is not an addition", () => {
 		),
 		[],
 	);
+});
+
+test("the first sync adopts the set instead of announcing all of it", () => {
+	const { history, added } = recordSync(null, ["clock", "star"], 1000);
+
+	assert.deepEqual(added, []);
+	assert.deepEqual(history.names, ["clock", "star"]);
+	assert.equal(history.last, undefined);
+});
+
+test("each round is the delta of one release, not the drift since the last ✓", () => {
+	// The reported bug: with three deploys stacked up, the answer to "what did I
+	// just ship" was 5, because the anchor only ever moved on acknowledgement.
+	let history: IconHistory = recordSync(null, ["a", "b"], 1000).history; // v1.0.0
+
+	const first = recordSync(history, ["a", "b", "c", "d"], 2000); // v1.0.1, +2
+	history = first.history;
+	assert.deepEqual(first.added, ["c", "d"]);
+	assert.deepEqual(unseenAdditions(history, ["a", "b", "c", "d"]), ["c", "d"]);
+
+	const second = recordSync(history, ["a", "b", "c", "d", "e"], 3000); // v1.0.2, +1
+	history = second.history;
+	assert.deepEqual(second.added, ["e"]);
+	assert.deepEqual(
+		unseenAdditions(history, ["a", "b", "c", "d", "e"]),
+		["e"],
+		"the latest release added one icon, so the flag says one",
+	);
+});
+
+test("an idle sync carries the round forward untouched", () => {
+	// Otherwise the flag would only be visible to whoever happened to sync in the
+	// window between the deploy and the next open, which is nobody.
+	let history = recordSync(null, ["a"], 1000).history;
+	history = recordSync(history, ["a", "b"], 2000).history;
+
+	const idle = recordSync(history, ["a", "b"], 9000);
+
+	assert.deepEqual(idle.added, [], "this sync found nothing");
+	assert.equal(idle.history.last?.at, 2000, "but the round it did not find is still the latest one");
+	assert.deepEqual(unseenAdditions(idle.history, ["a", "b"]), ["b"]);
+});
+
+test("acknowledging clears the round without moving the anchor", () => {
+	let history = recordSync(null, ["a"], 1000).history;
+	history = recordSync(history, ["a", "b"], 2000).history;
+
+	history = { ...history, seenAt: 2500 };
+	assert.deepEqual(unseenAdditions(history, ["a", "b"]), []);
+
+	// A later round outranks the acknowledgement — this is the whole point of
+	// comparing timestamps rather than storing a flag.
+	const next = recordSync(history, ["a", "b", "c"], 3000);
+	assert.deepEqual(unseenAdditions(next.history, ["a", "b", "c"]), ["c"]);
+});
+
+test("a name added then withdrawn stops being counted", () => {
+	let history = recordSync(null, ["a"], 1000).history;
+	history = recordSync(history, ["a", "b", "c"], 2000).history;
+
+	// `b` was rolled back. The round still names it, but there is no glyph to
+	// draw, so it must not keep inflating the count.
+	assert.deepEqual(unseenAdditions(history, ["a", "c"]), ["c"]);
+});
+
+test("a removal is not a round", () => {
+	let history = recordSync(null, ["a", "b"], 1000).history;
+
+	const shrunk = recordSync(history, ["a"], 2000);
+	assert.deepEqual(shrunk.added, []);
+	assert.equal(shrunk.history.last, undefined);
+	assert.deepEqual(shrunk.history.names, ["a"], "the anchor still moves, so a re-add reads as new");
+
+	const readded = recordSync(shrunk.history, ["a", "b"], 3000);
+	assert.deepEqual(readded.added, ["b"]);
 });
 
 test("the stylesheet URL always carries a cache buster", () => {

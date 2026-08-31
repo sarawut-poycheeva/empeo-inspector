@@ -96,18 +96,25 @@ environment are outlined, so *has my icon deployed yet* is answered at a glance.
 others. A codepoint that differs between environments is not a mismatch and never counted as
 one; see below for why.
 
-### New since you last looked
+### What the last release added
 
 The other half of the deploy question — *what did anyone add?* — needs no name to search for.
-Every set is diffed against a stored baseline of what you have already seen, and additions are
-marked `NEW`, counted in the header and selectable with the **New** filter.
+Additions are marked `NEW`, counted in the header and selectable with the **New** filter.
 
-The baseline is what you last **acknowledged**, not the previous fetch. Diffing consecutive
-fetches would clear the flag whether or not anyone read it, so an addition would only ever be
-visible to whoever happened to sync inside that window. Clicking the `N New ✓` chip is what
-moves the baseline forward.
+What gets flagged is **the most recent change**, not everything since you last looked. Those are
+different questions and the second one has no useful answer: it grows with every release nobody
+dismissed, so three deploys later `5 New` describes an interval, not a release. The anchor moves
+on every sync, which makes each round exactly one deploy's worth.
 
-The first run adopts the current set silently rather than announcing 1,204 new icons.
+A sync that finds nothing carries the round forward untouched — otherwise the flag would only
+ever be visible to whoever happened to open the popup between a deploy and the next sync, which
+is nobody. Clicking `N New ✓` acknowledges the round without touching the anchor; the next real
+change flags itself again.
+
+Two consequences worth knowing. A release you never synced through is folded into the next one,
+because the extension can only diff what it has actually seen. And the first run adopts the
+current set silently rather than announcing 1,205 new icons — which also means removing and
+reinstalling the extension wipes the history, absorbing whatever was pending.
 
 Only additions are reported. A removal breaks code that still references the class, which
 matters more, but it cannot be drawn as a card — there is no glyph left — so it belongs to a

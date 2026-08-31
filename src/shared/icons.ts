@@ -197,7 +197,7 @@ export function searchIcons(icons: Icon[], query: string): Icon[] {
 }
 
 /**
- * Names present now that the baseline had never seen.
+ * Names present now that the previous set had never seen.
  *
  * Deliberately one-directional: a name that disappears is not reported here.
  * Removals matter — they break code that still references the class — but they
@@ -207,4 +207,71 @@ export function searchIcons(icons: Icon[], query: string): Icon[] {
 export function newSince(names: string[], known: string[]): string[] {
 	const seen = new Set(known);
 	return names.filter((name) => !seen.has(name));
+}
+
+/** One observed change: when a sync first saw new names, and which ones. */
+export interface IconRound {
+	/**
+	 * When the change was *observed*. Not when it was deployed — nothing here
+	 * knows that, and `Last-Modified` moves for a rebuild that added nothing.
+	 */
+	at: number;
+	added: string[];
+}
+
+export interface IconHistory {
+	/** The set as of the last sync — the anchor the next sync diffs against. */
+	names: string[];
+	/** The most recent sync that actually added something. */
+	last?: IconRound;
+	/** When the user last said they had seen `last`. */
+	seenAt?: number;
+}
+
+/**
+ * Folds one sync into the history, and reports what *that* sync added.
+ *
+ * The anchor moves on **every** sync, not on acknowledgement. Anchoring it to
+ * the last "seen" instead — which is what this did first — makes the count grow
+ * across releases: three deploys later it answers "5 new" when the question
+ * being asked is "what landed in the release I just shipped". Moving the anchor
+ * every sync makes each round a release-sized delta.
+ *
+ * What keeps that from degrading into "whatever changed in the last hour" is
+ * that a sync finding nothing carries `last` forward untouched. A round
+ * survives any number of idle opens and is only ever displaced by another real
+ * change.
+ */
+export function recordSync(
+	history: IconHistory | null,
+	names: string[],
+	at: number,
+): { history: IconHistory; added: string[] } {
+	// The first run has nothing to diff against, so it adopts the current set
+	// rather than announcing all 1,205 icons as new.
+	if (!history) return { history: { names }, added: [] };
+
+	const added = newSince(names, history.names);
+
+	return {
+		history: { names, last: added.length ? { at, added } : history.last, seenAt: history.seenAt },
+		added,
+	};
+}
+
+/**
+ * The additions worth flagging: the latest round, unless it has been
+ * acknowledged, and only the names that are still there.
+ *
+ * That last filter matters. A round is a list of names, so one added in a
+ * release and withdrawn in the next would otherwise keep inflating a count that
+ * the grid has no glyph to draw.
+ */
+export function unseenAdditions(history: IconHistory | null, present: string[]): string[] {
+	const round = history?.last;
+	if (!round) return [];
+	if (history?.seenAt !== undefined && history.seenAt >= round.at) return [];
+
+	const here = new Set(present);
+	return round.added.filter((name) => here.has(name));
 }

@@ -86,6 +86,21 @@
     const seen = new Set(known);
     return names.filter((name) => !seen.has(name));
   }
+  function recordSync(history2, names, at) {
+    if (!history2) return { history: { names }, added: [] };
+    const added = newSince(names, history2.names);
+    return {
+      history: { names, last: added.length ? { at, added } : history2.last, seenAt: history2.seenAt },
+      added
+    };
+  }
+  function unseenAdditions(history2, present) {
+    const round = history2?.last;
+    if (!round) return [];
+    if (history2?.seenAt !== void 0 && history2.seenAt >= round.at) return [];
+    const here = new Set(present);
+    return round.added.filter((name) => here.has(name));
+  }
 
   // src/shared/redirect.ts
   function deriveName(path) {
@@ -2457,36 +2472,47 @@
   });
   var ICON_CACHE_KEY = "ds-icons:snapshot:v1";
   var ICON_VIEW_KEY = "ds-icons:view";
-  var ICON_BASELINE_KEY = "ds-icons:baseline:v1";
+  var ICON_ROUNDS_KEY = "ds-icons:rounds:v1";
+  var ICON_BASELINE_KEY_V1 = "ds-icons:baseline:v1";
   var icons = [];
   var iconFilter = "all";
   var iconView = readIconView();
   var iconsLoaded = false;
-  var baseline = readBaseline();
+  var history = readHistory();
   var freshNames = /* @__PURE__ */ new Set();
-  function readBaseline() {
+  function readHistory() {
     try {
-      const raw = localStorage.getItem(ICON_BASELINE_KEY);
+      localStorage.removeItem(ICON_BASELINE_KEY_V1);
+      const raw = localStorage.getItem(ICON_ROUNDS_KEY);
       return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
     }
   }
-  function writeBaseline(names) {
-    baseline = { at: Date.now(), names };
+  function writeHistory(next) {
+    history = next;
     try {
-      localStorage.setItem(ICON_BASELINE_KEY, JSON.stringify(baseline));
+      localStorage.setItem(ICON_ROUNDS_KEY, JSON.stringify(next));
     } catch {
     }
   }
-  function diffAgainstBaseline() {
-    const names = icons.map((icon) => icon.short);
-    if (baseline) {
-      freshNames = new Set(newSince(names, baseline.names));
-    } else {
-      writeBaseline(names);
-      freshNames = /* @__PURE__ */ new Set();
-    }
+  function observeSync() {
+    const { history: next, added } = recordSync(
+      history,
+      icons.map((icon) => icon.short),
+      Date.now()
+    );
+    writeHistory(next);
+    applyFresh();
+    return added;
+  }
+  function applyFresh() {
+    freshNames = new Set(
+      unseenAdditions(
+        history,
+        icons.map((icon) => icon.short)
+      )
+    );
     $icNew.disabled = freshNames.size === 0;
     if (!freshNames.size && iconFilter === "new") iconFilter = "all";
   }
@@ -2494,7 +2520,7 @@
     return freshNames.has(icon.short);
   }
   function markAllSeen() {
-    writeBaseline(icons.map((icon) => icon.short));
+    if (history) writeHistory({ ...history, seenAt: Date.now() });
     freshNames = /* @__PURE__ */ new Set();
     if (iconFilter === "new") setIconFilter("all");
     else renderIconsPanel();
@@ -2586,8 +2612,9 @@
   }
   function freshFlag() {
     if (!freshNames.size) return "";
-    const since = baseline ? ` since ${shortDate(new Date(baseline.at).toUTCString())}` : "";
-    const title = `${freshNames.size} icon(s) added${since} \u2014 click to mark them all as seen`;
+    const at = history?.last?.at;
+    const when = at ? ` in the ${shortDate(new Date(at).toUTCString())} ${clockOf(at)} sync` : "";
+    const title = `${freshNames.size} icon(s) added${when} \u2014 click to mark them all as seen`;
     return ` <button type="button" class="newchip" id="seen" title="${escapeHtml(title)}">${freshNames.size} New \u2713</button>`;
   }
   var lastSnapshot = null;
@@ -2656,7 +2683,7 @@
     const cached = readIconCache();
     if (cached && !hard) {
       icons = mergeByName(cached.perEnv);
-      diffAgainstBaseline();
+      applyFresh();
       renderEnvLine(cached);
       renderIcons();
       $iconIdle.hidden = true;
@@ -2667,11 +2694,11 @@
       const snapshot = { fetchedAt: Date.now(), perEnv, modified };
       writeIconCache(snapshot);
       icons = mergeByName(perEnv);
-      diffAgainstBaseline();
+      const added = observeSync();
       renderEnvLine(snapshot);
       renderIcons();
       $iconIdle.hidden = true;
-      if (hard) toast(freshNames.size ? `Synced \xB7 ${freshNames.size} new` : `Synced \xB7 ${icons.length} icons`);
+      if (hard) toast(added.length ? `Synced \xB7 ${added.length} new` : `Synced \xB7 ${icons.length} icons`);
     } catch (error) {
       iconsLoaded = false;
       if (!cached) {
