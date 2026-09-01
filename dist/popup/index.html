@@ -16,6 +16,7 @@
 			<button type="button" role="tab" id="lens-colors" aria-selected="true">Colors</button>
 			<button type="button" role="tab" id="lens-icons" aria-selected="false">Icons</button>
 			<button type="button" role="tab" id="lens-redirect" aria-selected="false">Redirect</button>
+			<button type="button" role="tab" id="lens-screens" aria-selected="false">Screens</button>
 		</div>
 
 		<div class="search">
@@ -183,6 +184,31 @@
 						<button type="submit" id="radd" data-testid="button-redirect-add">Add</button>
 						<button type="button" id="rcancel" title="Cancel editing (Esc)" data-testid="button-redirect-cancel" hidden>✕</button>
 					</form>
+				</section>
+			</div>
+
+			<!-- ===== Screens lens ===== -->
+			<div id="panel-screens" hidden>
+				<section class="blk">
+					<div class="blk-head">
+						<h2 class="lbl">Screens</h2>
+						<span class="scrhost" id="scrhost"></span>
+					</div>
+
+					<div class="notice" id="scrnotice" hidden></div>
+
+					<p class="blurb">
+						Renders the page you are on at several widths at once, inside this tab — so every frame is
+						same-origin and keeps the session you are already signed into.
+					</p>
+
+					<ul class="sizes" id="sizes"></ul>
+
+					<button class="primary" id="scropen" type="button" data-testid="button-screens-open">
+						Open on this page
+					</button>
+
+					<p class="foot">Esc closes it. Opening it again also closes it.</p>
 				</section>
 			</div>
 		</main>

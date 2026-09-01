@@ -172,6 +172,27 @@
     return [...paths].sort((a, b) => a.localeCompare(b));
   }
 
+  // src/shared/screens.ts
+  var PRESETS = [
+    { id: "webview", name: "Webview", w: 390, h: 844 },
+    { id: "se", name: "iPhone SE", w: 375, h: 667 },
+    { id: "ipad", name: "iPad mini", w: 744, h: 1133 },
+    { id: "laptop", name: "Laptop", w: 1280, h: 800 },
+    { id: "desktop", name: "Desktop", w: 1440, h: 900 },
+    { id: "wide", name: "Wide", w: 1920, h: 1080 }
+  ];
+  var SCREENS_STORAGE_KEY = "screens";
+  var DEFAULT_SCREENS_STATE = {
+    enabled: ["webview", "ipad", "laptop", "desktop"],
+    zoom: 0.35,
+    sync: true
+  };
+  function toggle(state, id) {
+    const enabled = state.enabled.includes(id) ? state.enabled.filter((other) => other !== id) : [...state.enabled, id];
+    return { ...state, enabled };
+  }
+  var UNSUPPORTED_PAGE = /^(chrome|chrome-extension|edge|about|devtools|view-source|file):|^https:\/\/chromewebstore\.google\.com/;
+
   // src/shared/tokens.generated.ts
   var TOKENS = {
     "themes": [
@@ -2315,6 +2336,12 @@
   var $search = document.querySelector(".search");
   var $lensRedirect = document.getElementById("lens-redirect");
   var $panelRedirect = document.getElementById("panel-redirect");
+  var $lensScreens = document.getElementById("lens-screens");
+  var $panelScreens = document.getElementById("panel-screens");
+  var $sizes = document.getElementById("sizes");
+  var $scrOpen = document.getElementById("scropen");
+  var $scrHost = document.getElementById("scrhost");
+  var $scrNotice = document.getElementById("scrnotice");
   var $rules = document.getElementById("rules");
   var $ruleIdle = document.getElementById("ruleidle");
   var $notice = document.getElementById("rnotice");
@@ -2769,26 +2796,30 @@
   }
   var LENS_KEY = "ds-colors:lens";
   var lens = "colors";
-  var queries = { colors: "", icons: "", redirect: "" };
+  var SCREENS_ENABLED = false;
+  var queries = { colors: "", icons: "", redirect: "", screens: "" };
   function applyLens(next) {
+    if (next === "screens" && !SCREENS_ENABLED) next = "colors";
     if (next !== lens) queries[lens] = $q.value;
     lens = next;
     $q.value = queries[next];
     for (const [tab, panel, name] of [
       [$lensColors, $panelColors, "colors"],
       [$lensIcons, $panelIcons, "icons"],
-      [$lensRedirect, $panelRedirect, "redirect"]
+      [$lensRedirect, $panelRedirect, "redirect"],
+      [$lensScreens, $panelScreens, "screens"]
     ]) {
       tab.setAttribute("aria-selected", String(next === name));
       panel.hidden = next !== name;
     }
     $brand.hidden = next !== "colors";
     $pick.hidden = next !== "colors" || !window.EyeDropper;
-    $search.hidden = next === "redirect";
+    $search.hidden = next === "redirect" || next === "screens";
     $q.placeholder = next === "icons" ? "Search icons by name or codepoint" : "Paste hex, box-shadow or token name";
     localStorage.setItem(LENS_KEY, next);
     if (next === "icons") void loadIcons();
     if (next === "redirect") void loadRules();
+    if (next === "screens") void loadScreens();
     renderCurrent();
   }
   function renderCurrent() {
@@ -2810,10 +2841,12 @@
   for (const [tab, name] of [
     [$lensColors, "colors"],
     [$lensIcons, "icons"],
-    [$lensRedirect, "redirect"]
+    [$lensRedirect, "redirect"],
+    [$lensScreens, "screens"]
   ]) {
     tab.addEventListener("click", () => applyLens(name));
   }
+  $lensScreens.hidden = !SCREENS_ENABLED;
   function setIconFilter(next) {
     iconFilter = next;
     $icAll.setAttribute("aria-pressed", String(next === "all"));
@@ -3232,6 +3265,57 @@
     const listMoved = entries !== void 0 && JSON.stringify(entries) !== JSON.stringify(rules);
     const flagMoved = flag !== void 0 && flag !== globalEnabled;
     if (listMoved || flagMoved) void loadRules();
+  });
+  var screens = DEFAULT_SCREENS_STATE;
+  async function loadScreens() {
+    try {
+      const stored = await chrome.storage.local.get(SCREENS_STORAGE_KEY);
+      screens = { ...DEFAULT_SCREENS_STATE, ...stored[SCREENS_STORAGE_KEY] };
+    } catch {
+      screens = DEFAULT_SCREENS_STATE;
+    }
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const url = tab?.url ?? "";
+    const blocked = !url || UNSUPPORTED_PAGE.test(url);
+    $scrHost.textContent = blocked ? "" : new URL(url).host;
+    $scrOpen.disabled = blocked;
+    setScreensNotice(
+      blocked ? "This is a browser page. Open a site first \u2014 no extension can render frames here." : ""
+    );
+    renderSizes();
+  }
+  function setScreensNotice(text) {
+    $scrNotice.textContent = text;
+    $scrNotice.hidden = !text;
+  }
+  function renderSizes() {
+    $sizes.innerHTML = PRESETS.map((preset) => {
+      const on = screens.enabled.includes(preset.id);
+      return `<li><button type="button" class="size${on ? " on" : ""}" data-id="${preset.id}" data-testid="button-screens-size-${preset.id}" aria-pressed="${on}"><span class="sname">${preset.name}</span><span class="sdim">${preset.w} \xD7 ${preset.h}</span></button></li>`;
+    }).join("");
+  }
+  $sizes.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-id]");
+    if (!button?.dataset.id) return;
+    screens = toggle(screens, button.dataset.id);
+    void chrome.storage.local.set({ [SCREENS_STORAGE_KEY]: screens });
+    renderSizes();
+  });
+  $scrOpen.addEventListener("click", async () => {
+    if (!chrome.scripting?.executeScript) {
+      setScreensNotice(
+        "Screens needs the scripting permission, which Chrome grants on install and not on Reload. Remove the extension and Load unpacked again."
+      );
+      return;
+    }
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id === void 0) return;
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+      window.close();
+    } catch (error) {
+      setScreensNotice(String(error instanceof Error ? error.message : error));
+    }
   });
   setUpEyeDropper();
   setUpFold();

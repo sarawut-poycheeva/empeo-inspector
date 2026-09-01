@@ -330,6 +330,63 @@ redirect running.
 `localStorage` — the other two lenses keep using `localStorage` for their own view preferences,
 which the worker has no business knowing.
 
+## Screens lens — built, and switched off
+
+> **Not in the shipped build.** `SCREENS_ENABLED` in `src/popup/popup.ts` is `false`, so the tab
+> is hidden and nothing here can run. Flip it to `true` and rebuild; the panel, the overlay and
+> `content.js` are all still wired, and that constant is the only switch.
+>
+> It is off because it has never been opened against a real portal. It builds, it is typed and its
+> logic is covered by tests — none of which can answer the two questions at the end of this
+> section, and a lens that might show five login screens is worse than no lens.
+
+What it does: renders the page you are on at several widths at once. Pick the sizes in the popup,
+press **Open on this page**; Esc closes it, and so does opening it again.
+
+The design notes below are kept because they are the reasoning to re-check, not to re-derive, when
+someone picks this up.
+
+### It renders in your tab, not in a viewer tab of its own
+
+This is the whole design, and it is one decision rather than three. The obvious build — a viewer
+page of our own at `chrome-extension://…` — makes the top-level document ours, and that costs:
+
+| | In a viewer tab | In your tab |
+|---|---|---|
+| `X-Frame-Options: SAMEORIGIN` | rejects the frames; needs a DNR rule stripping response headers | passes, because the frames are same-origin |
+| cookies | request is now cross-site, so `SameSite` cookies stop being sent | sent normally |
+| `sessionStorage` | scoped to the tab, so a new tab starts empty | already holds the token |
+
+That third row is decisive here. Both empeo and core-web keep `access_token` in `sessionStorage`
+(`auth.service.ts`, `master.service.ts`), and `sessionStorage` is per-tab. A viewer tab would show
+five login screens. Staying in the tab means the frames read the token the app already put there.
+
+Same-origin also buys scroll sync for free: the overlay can reach `iframe.contentDocument` and
+listen directly. Across origins that would need `postMessage` and cooperation from the app.
+
+### Sync scrolls by fraction, not by pixels
+
+A 390px column of the same content is far taller than a 1440px grid of it, so matching `scrollTop`
+puts one frame halfway down while another is at the end — and layouts diverging is the only reason
+to have opened this. Each frame reports how far through its own length it is, and the others go to
+the same fraction.
+
+### It lives in a shadow root
+
+The host page is a full design system with a `*` reset and its own z-index ladder. An overlay in
+the light DOM inherits all of it and loses. Everything is inside `attachShadow`, and the host
+carries `all: initial` so nothing leaks in either direction.
+
+### The two questions that keep it switched off
+
+Neither can be settled without a logged-in portal, and both change what this should become:
+
+- **Does the session survive?** If a frame lands on the login screen, the `sessionStorage`
+  reasoning above is wrong and the lens needs a different approach.
+- **Do five Angular apps coexist in one tab?** Each frame boots the app again, and Module
+  Federation shares singletons across a container. If they collide, that sets the ceiling on how
+  many frames the rail can hold. `uat-dev` also ships a 62 MB bundle — prefer `uat` for this.
+
 ## Layout
 
 ```
@@ -338,9 +395,11 @@ src/shared/tokens.ts           colour + shadow matching
 src/shared/tokens.generated.ts generated colour data (do not edit)
 src/shared/icons.ts            icon stylesheet parsing and cross-env merging
 src/shared/redirect.ts         path normalising and DNR rule building
+src/shared/screens.ts          device presets, scroll-sync and frame maths (off)
 src/background.ts              service worker: storage → redirect rules
+src/content.ts                 the Screens overlay, injected on demand (off)
 src/popup/                     the popup: index.html, popup.css, popup.ts
-test/                          46 tests over all three lenses
+test/                          73 tests over the three live lenses and Screens
 dist/                          built output, committed for distribution
 ```
 
@@ -359,7 +418,7 @@ worth stating plainly rather than burying in the manifest:
 |---|---|
 | `declarativeNetRequest` | the redirect itself |
 | `declarativeNetRequestFeedback` | reading Chrome's log of which rules matched, for `on this page` |
-| `scripting` + `activeTab` | `Scan page` — reading the resource list out of the tab you opened the popup on, and nothing else |
+| `scripting` + `activeTab` | `Scan page` — reading the resource list out of the tab you opened the popup on, and nothing else (`Screens` would also use it, but it is switched off) |
 | `storage` | the popup and the service worker have to share one rule list |
 | `host_permissions: <all_urls>` | a DNR redirect action needs host access **for the request being redirected**, and the whole point is that one entry covers dev, uat and prod |
 
@@ -374,7 +433,13 @@ tab — the other two lenses go back to needing zero permissions.
 Colour data is bundled into the popup. Icon data is fetched from the asset CDN, possible without
 a host permission of its own because that CDN sends `access-control-allow-origin: *`.
 
-The only page access is `Scan page`, which reads the resource-timing list from the tab you opened the popup on. There is still no content script and nothing is ever written to a page.
+The only page access in the shipped build is `Scan page`, which reads the resource-timing list
+from the tab you opened the popup on. There is no content script and nothing is written to a page.
+
+`Screens` would change that — it appends an element and injects a script, the first thing here
+that writes to a page at all — but it is behind `SCREENS_ENABLED` and cannot be reached. The
+statement above holds as long as that flag is `false`; turning it on means revising this section,
+not just the feature.
 
 ## Not in this version
 
