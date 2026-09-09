@@ -8,13 +8,7 @@ await rm(outdir, { recursive: true, force: true });
 await mkdir(`${outdir}/popup`, { recursive: true });
 
 const options = {
-	entryPoints: {
-		"popup/popup": "src/popup/popup.ts",
-		background: "src/background.ts",
-		// Injected on demand by the Screens lens, never declared in the manifest —
-		// it covers the viewport and reloads the app several times over.
-		content: "src/content.ts",
-	},
+	entryPoints: { "popup/popup": "src/popup/popup.ts", background: "src/background.ts" },
 	outdir,
 	bundle: true,
 	format: "iife",

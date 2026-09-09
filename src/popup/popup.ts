@@ -32,13 +32,6 @@ import {
 	type RedirectEntry,
 	type RedirectState,
 } from "../shared/redirect.ts";
-import {
-	DEFAULT_SCREENS_STATE,
-	PRESETS,
-	SCREENS_STORAGE_KEY,
-	toggle as toggleScreen,
-	type ScreensState,
-} from "../shared/screens.ts";
 import { TOKENS } from "../shared/tokens.generated.ts";
 import {
 	brandsOf,
@@ -122,12 +115,6 @@ const $refresh = document.getElementById("refresh") as HTMLButtonElement;
 const $search = document.querySelector(".search") as HTMLElement;
 const $lensRedirect = document.getElementById("lens-redirect") as HTMLButtonElement;
 const $panelRedirect = document.getElementById("panel-redirect") as HTMLElement;
-const $lensScreens = document.getElementById("lens-screens") as HTMLButtonElement;
-const $panelScreens = document.getElementById("panel-screens") as HTMLElement;
-const $sizes = document.getElementById("sizes") as HTMLElement;
-const $scrOpen = document.getElementById("scropen") as HTMLButtonElement;
-const $scrHost = document.getElementById("scrhost") as HTMLElement;
-const $scrNotice = document.getElementById("scrnotice") as HTMLElement;
 const $rules = document.getElementById("rules") as HTMLElement;
 const $ruleIdle = document.getElementById("ruleidle") as HTMLElement;
 const $notice = document.getElementById("rnotice") as HTMLElement;
@@ -922,23 +909,9 @@ async function loadIcons(hard = false): Promise<void> {
 // ==================== lens switching ====================
 
 const LENS_KEY = "ds-colors:lens";
-type Lens = "colors" | "icons" | "redirect" | "screens";
+type Lens = "colors" | "icons" | "redirect";
 let lens: Lens = "colors";
 
-/**
- * Screens is built and tested but not exposed yet.
- *
- * It works on paper and has never been opened against a real portal, so the two
- * questions that decide its shape — whether the frames keep the tab's session,
- * and whether several copies of the app can boot in one tab — are still open.
- * A lens that might show five login screens is worse than no lens.
- *
- * Kept rather than removed, because the answer to both questions is one session
- * with a logged-in portal away. Flip this to `true`, rebuild, and the tab, the
- * panel and `content.js` are all still wired. Everything the flag touches is
- * reachable from this constant — there is no second switch.
- */
-const SCREENS_ENABLED = false;
 
 /**
  * One input, two lenses, two unrelated vocabularies — a hex means nothing to the
@@ -946,14 +919,9 @@ const SCREENS_ENABLED = false;
  * made switching lenses land on "No result" every time, so each lens keeps its
  * own query and gets it back on return.
  */
-const queries: Record<Lens, string> = { colors: "", icons: "", redirect: "", screens: "" };
+const queries: Record<Lens, string> = { colors: "", icons: "", redirect: "" };
 
 function applyLens(next: Lens): void {
-	// The stored lens outlives the flag: someone who was on Screens when it was
-	// switched off would otherwise reopen the popup to a selected tab that is not
-	// on screen, and a body that renders nothing.
-	if (next === "screens" && !SCREENS_ENABLED) next = "colors";
-
 	if (next !== lens) queries[lens] = $q.value;
 	lens = next;
 
@@ -963,7 +931,6 @@ function applyLens(next: Lens): void {
 		[$lensColors, $panelColors, "colors"],
 		[$lensIcons, $panelIcons, "icons"],
 		[$lensRedirect, $panelRedirect, "redirect"],
-		[$lensScreens, $panelScreens, "screens"],
 	] as const) {
 		tab.setAttribute("aria-selected", String(next === name));
 		panel.hidden = next !== name;
@@ -973,9 +940,9 @@ function applyLens(next: Lens): void {
 	$brand.hidden = next !== "colors";
 	$pick.hidden = next !== "colors" || !window.EyeDropper;
 
-	// Neither of these lenses searches anything: one takes a module path, the
-	// other a set of device sizes.
-	$search.hidden = next === "redirect" || next === "screens";
+	// The redirect lens has no search: its list is a handful of rows, and its own
+	// input takes a path, which has nothing to do with either other lens.
+	$search.hidden = next === "redirect";
 
 	$q.placeholder = next === "icons" ? "Search icons by name or codepoint" : "Paste hex, box-shadow or token name";
 
@@ -983,7 +950,6 @@ function applyLens(next: Lens): void {
 
 	if (next === "icons") void loadIcons();
 	if (next === "redirect") void loadRules();
-	if (next === "screens") void loadScreens();
 	renderCurrent();
 }
 
@@ -1018,14 +984,9 @@ for (const [tab, name] of [
 	[$lensColors, "colors"],
 	[$lensIcons, "icons"],
 	[$lensRedirect, "redirect"],
-	[$lensScreens, "screens"],
 ] as const) {
 	tab.addEventListener("click", () => applyLens(name));
 }
-
-// Hidden here rather than deleted from index.html, so the flag is the only thing
-// that has to move to bring it back.
-$lensScreens.hidden = !SCREENS_ENABLED;
 
 function setIconFilter(next: typeof iconFilter): void {
 	iconFilter = next;
@@ -1753,87 +1714,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
 	const flagMoved = flag !== undefined && flag !== globalEnabled;
 
 	if (listMoved || flagMoved) void loadRules();
-});
-
-// ==================== screens lens ====================
-
-/**
- * The popup is 480px wide, so it is not where the frames go — it only chooses
- * the sizes and asks the page to render them. The overlay itself lives in
- * `src/content.ts`, inside the tab, which is what keeps every frame same-origin
- * and signed in. See the note at the top of `shared/screens.ts`.
- */
-let screens: ScreensState = DEFAULT_SCREENS_STATE;
-
-async function loadScreens(): Promise<void> {
-	try {
-		const stored = await chrome.storage.local.get(SCREENS_STORAGE_KEY);
-		screens = { ...DEFAULT_SCREENS_STATE, ...(stored[SCREENS_STORAGE_KEY] as Partial<ScreensState>) };
-	} catch {
-		screens = DEFAULT_SCREENS_STATE;
-	}
-
-	const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-	const url = tab?.url ?? "";
-	const blocked = !url || UNSUPPORTED_PAGE.test(url);
-
-	$scrHost.textContent = blocked ? "" : new URL(url).host;
-	$scrOpen.disabled = blocked;
-
-	setScreensNotice(
-		blocked ? "This is a browser page. Open a site first — no extension can render frames here." : "",
-	);
-
-	renderSizes();
-}
-
-function setScreensNotice(text: string): void {
-	$scrNotice.textContent = text;
-	$scrNotice.hidden = !text;
-}
-
-function renderSizes(): void {
-	$sizes.innerHTML = PRESETS.map((preset) => {
-		const on = screens.enabled.includes(preset.id);
-		return (
-			`<li><button type="button" class="size${on ? " on" : ""}" data-id="${preset.id}" ` +
-			`data-testid="button-screens-size-${preset.id}" aria-pressed="${on}">` +
-			`<span class="sname">${preset.name}</span>` +
-			`<span class="sdim">${preset.w} × ${preset.h}</span></button></li>`
-		);
-	}).join("");
-}
-
-$sizes.addEventListener("click", (event) => {
-	const button = (event.target as HTMLElement).closest<HTMLElement>("[data-id]");
-	if (!button?.dataset.id) return;
-
-	screens = toggleScreen(screens, button.dataset.id);
-	void chrome.storage.local.set({ [SCREENS_STORAGE_KEY]: screens });
-	renderSizes();
-});
-
-$scrOpen.addEventListener("click", async () => {
-	// Same trap the Redirect lens documents: `scripting` is granted on install,
-	// never on Reload, and reaching through the missing namespace throws a
-	// TypeError that says nothing about the cause.
-	if (!chrome.scripting?.executeScript) {
-		setScreensNotice(
-			"Screens needs the scripting permission, which Chrome grants on install and not on Reload. " +
-				"Remove the extension and Load unpacked again.",
-		);
-		return;
-	}
-
-	const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-	if (tab?.id === undefined) return;
-
-	try {
-		await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
-		window.close(); // the overlay is behind the popup; leaving it open hides the thing just opened
-	} catch (error) {
-		setScreensNotice(String(error instanceof Error ? error.message : error));
-	}
 });
 
 setUpEyeDropper();
