@@ -909,8 +909,27 @@ async function loadIcons(hard = false): Promise<void> {
 // ==================== lens switching ====================
 
 const LENS_KEY = "ds-colors:lens";
-type Lens = "colors" | "icons" | "redirect";
+
+/** The list is the source of the type, so the two cannot drift apart. */
+const LENSES = ["colors", "icons", "redirect"] as const;
+type Lens = (typeof LENSES)[number];
+
 let lens: Lens = "colors";
+
+/**
+ * The stored lens is whatever a previous *version* wrote, not whatever this one
+ * can render, so it has to be checked rather than cast.
+ *
+ * Removing the Screens lens is what surfaced this: anyone who had that tab
+ * selected still has `"screens"` in storage, and a bare cast sends it straight
+ * into `applyLens`, which hides every panel it knows about and matches none —
+ * a blank popup, with no error and nothing to click. The same hole reopens on
+ * any future rename.
+ */
+function storedLens(): Lens {
+	const raw = localStorage.getItem(LENS_KEY);
+	return LENSES.includes(raw as Lens) ? (raw as Lens) : "colors";
+}
 
 
 /**
@@ -1718,7 +1737,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 setUpEyeDropper();
 setUpFold();
-applyLens((localStorage.getItem(LENS_KEY) as Lens | null) ?? "colors");
+applyLens(storedLens());
 
 syncMode();
 applyAccent();

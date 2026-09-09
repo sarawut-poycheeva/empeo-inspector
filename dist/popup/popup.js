@@ -2771,7 +2771,12 @@
     }
   }
   var LENS_KEY = "ds-colors:lens";
+  var LENSES = ["colors", "icons", "redirect"];
   var lens = "colors";
+  function storedLens() {
+    const raw = localStorage.getItem(LENS_KEY);
+    return LENSES.includes(raw) ? raw : "colors";
+  }
   var queries = { colors: "", icons: "", redirect: "" };
   function applyLens(next) {
     if (next !== lens) queries[lens] = $q.value;
@@ -3237,7 +3242,7 @@
   });
   setUpEyeDropper();
   setUpFold();
-  applyLens(localStorage.getItem(LENS_KEY) ?? "colors");
+  applyLens(storedLens());
   syncMode();
   applyAccent();
   renderList();
