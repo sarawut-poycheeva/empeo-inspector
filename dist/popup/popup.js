@@ -102,6 +102,9 @@
     return round.added.filter((name) => here.has(name));
   }
 
+  // src/shared/pages.ts
+  var UNSUPPORTED_PAGE = /^(chrome|chrome-extension|edge|about|devtools|view-source|file):|^https:\/\/chromewebstore\.google\.com/;
+
   // src/shared/redirect.ts
   function deriveName(path) {
     const segments = path.split("/").filter(Boolean);
@@ -191,7 +194,6 @@
     const enabled = state.enabled.includes(id) ? state.enabled.filter((other) => other !== id) : [...state.enabled, id];
     return { ...state, enabled };
   }
-  var UNSUPPORTED_PAGE = /^(chrome|chrome-extension|edge|about|devtools|view-source|file):|^https:\/\/chromewebstore\.google\.com/;
 
   // src/shared/tokens.generated.ts
   var TOKENS = {
@@ -3141,7 +3143,6 @@
     $addRule.classList.remove("editing");
     if (wasEditing) renderRules();
   }
-  var UNSCANNABLE = /^(chrome|chrome-extension|edge|about|devtools|view-source|file):|^https:\/\/chromewebstore\.google\.com/;
   async function scanPage() {
     $scan.classList.add("is-busy");
     try {
@@ -3157,7 +3158,7 @@
         toast("No page to scan");
         return;
       }
-      if (tab.url && UNSCANNABLE.test(tab.url)) {
+      if (tab.url && UNSUPPORTED_PAGE.test(tab.url)) {
         toast("Browser pages cannot be scanned");
         return;
       }

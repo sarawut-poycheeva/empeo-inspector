@@ -17,6 +17,7 @@ import {
 	type IconHistory,
 	type ParsedIcon,
 } from "../shared/icons.ts";
+import { UNSUPPORTED_PAGE } from "../shared/pages.ts";
 import {
 	activeCount,
 	addEntry,
@@ -36,7 +37,6 @@ import {
 	PRESETS,
 	SCREENS_STORAGE_KEY,
 	toggle as toggleScreen,
-	UNSUPPORTED_PAGE,
 	type ScreensState,
 } from "../shared/screens.ts";
 import { TOKENS } from "../shared/tokens.generated.ts";
@@ -1574,8 +1574,6 @@ function stopEditing(): void {
  * to that one tab, and it lapses when the tab navigates. It cannot read a tab you
  * did not open the popup on.
  */
-/** Pages no extension may touch, whatever it was granted. */
-const UNSCANNABLE = /^(chrome|chrome-extension|edge|about|devtools|view-source|file):|^https:\/\/chromewebstore\.google\.com/;
 
 async function scanPage(): Promise<void> {
 	$scan.classList.add("is-busy");
@@ -1599,7 +1597,7 @@ async function scanPage(): Promise<void> {
 			return;
 		}
 
-		if (tab.url && UNSCANNABLE.test(tab.url)) {
+		if (tab.url && UNSUPPORTED_PAGE.test(tab.url)) {
 			toast("Browser pages cannot be scanned");
 			return;
 		}

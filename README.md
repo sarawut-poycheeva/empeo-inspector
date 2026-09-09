@@ -395,11 +395,12 @@ src/shared/tokens.ts           colour + shadow matching
 src/shared/tokens.generated.ts generated colour data (do not edit)
 src/shared/icons.ts            icon stylesheet parsing and cross-env merging
 src/shared/redirect.ts         path normalising and DNR rule building
+src/shared/pages.ts            which URLs no extension may touch
 src/shared/screens.ts          device presets, scroll-sync and frame maths (off)
 src/background.ts              service worker: storage → redirect rules
 src/content.ts                 the Screens overlay, injected on demand (off)
 src/popup/                     the popup: index.html, popup.css, popup.ts
-test/                          73 tests over the three live lenses and Screens
+test/                          74 tests over the three live lenses and Screens
 dist/                          built output, committed for distribution
 ```
 

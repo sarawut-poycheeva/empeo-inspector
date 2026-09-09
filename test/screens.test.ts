@@ -9,7 +9,6 @@ import {
 	scrollFor,
 	scrollRatio,
 	toggle,
-	UNSUPPORTED_PAGE,
 	ZOOMS,
 	type ScreensState,
 } from "../src/shared/screens.ts";
@@ -80,12 +79,4 @@ test("a frame never grows past the rail", () => {
 	// frame's content out of view.
 	assert.deepEqual(frameBox(ipad, 0.75, 600), { w: 558, h: 600 });
 	assert.deepEqual(frameBox(ipad, 0.25, 600), { w: 186, h: 283 });
-});
-
-test("browser pages are refused, and real ones are not", () => {
-	assert.equal(UNSUPPORTED_PAGE.test("chrome://extensions"), true);
-	assert.equal(UNSUPPORTED_PAGE.test("chrome-extension://abc/popup/index.html"), true);
-	assert.equal(UNSUPPORTED_PAGE.test("https://chromewebstore.google.com/detail/x"), true);
-	assert.equal(UNSUPPORTED_PAGE.test("https://portal.uat.empeo.com/employee"), false);
-	assert.equal(UNSUPPORTED_PAGE.test("http://localhost:4200/"), false);
 });

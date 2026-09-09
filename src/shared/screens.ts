@@ -103,11 +103,3 @@ export function frameBox(preset: DevicePreset, zoom: number, maxHeight: number):
 		h: Math.round(Math.min(preset.h * zoom, maxHeight)),
 	};
 }
-
-/**
- * Pages that cannot host the overlay. Same list the Redirect lens scans
- * against, for the same reason: no extension may script them, and the failure
- * arrives as an opaque error rather than a refusal.
- */
-export const UNSUPPORTED_PAGE =
-	/^(chrome|chrome-extension|edge|about|devtools|view-source|file):|^https:\/\/chromewebstore\.google\.com/;
