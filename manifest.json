@@ -2,6 +2,7 @@
 	"manifest_version": 3,
 	"name": "Dev Inspectors",
 	"version": "0.5.0",
+	"minimum_chrome_version": "111",
 	"description": "Look up a design system token, check which icons have shipped, and point a deployed module at your local build.",
 	"permissions": ["activeTab", "declarativeNetRequest", "declarativeNetRequestFeedback", "scripting", "storage"],
 	"host_permissions": ["<all_urls>"],

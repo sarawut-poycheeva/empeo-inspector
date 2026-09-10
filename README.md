@@ -15,19 +15,34 @@ All three answer questions that cost real time: *which `go5-` class is this colo
 file*, *has the icon someone added actually been deployed*, and *does my change work against real
 UAT data before I deploy it*.
 
-## Install (unpacked)
+## Install
+
+Nothing to build and nothing to install. `dist/` is committed for exactly this reason.
+
+```bash
+git clone https://github.com/sarawut-poycheeva/empeo-inspector.git
+```
+
+Then in Chrome: **Extensions → Developer mode → Load unpacked → pick the `dist/` folder**
+(the folder itself, not the repo root). Needs **Chrome 111+**.
+
+Chrome will warn that the extension can read and change your data on all sites. That is
+`host_permissions: <all_urls>`, and it is real — see [Permissions](#permissions) for what it is
+for and what is actually done with it.
+
+**To update:** `git pull`, then press **Reload** on the extension card. If the pull touched
+`manifest.json`, use **Remove** then **Load unpacked** instead — Chrome does not reliably re-read
+a changed manifest on Reload, and a new permission is never granted by one. Removing also wipes
+`chrome.storage.local` and `localStorage`, which means your redirect list and the icon baseline.
+
+### Working on it
 
 ```bash
 npm install
-npm run build
+npm run build      # or: npm run watch
 ```
 
-Then in Chrome: **Extensions → Developer mode → Load unpacked → pick the `dist/` folder.**
-
-`dist/` is committed, so a teammate can `git pull` and load it without installing anything.
-
-> If you change `manifest.json`, use **Remove** then **Load unpacked** again. Chrome's
-> *Reload* button does not reliably re-read a changed manifest.
+Commit the rebuilt `dist/` along with the source, or teammates pull a stale extension.
 
 ## Colors lens
 
